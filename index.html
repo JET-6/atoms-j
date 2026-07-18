@@ -1,0 +1,2931 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>ATOMS J — Repository Outside Time</title>
+  <meta name="description" content="A memory archive. A repository outside conventional time." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' fill='%23070510'/><text y='22' x='4' font-size='20' fill='%23c8a84b'>J</text></svg>" />
+
+  <!-- CDN Dependencies -->
+  <script src="./public/lib/pixi.min.js"></script>
+  <script src="./public/lib/gsap.min.js"></script>
+
+  <!-- =============================================================
+       ATOMS J — REPOSITORY OUTSIDE TIME
+       Single-File Prototype v1.0
+
+       COMPLETED SYSTEMS:
+         - Boot sequence & initialization screen
+         - PixiJS multi-layer scene with parallax
+         - Procedural room: bookshelves, desk, computer, window, city
+         - Day/night cycle (sky, city lights, interior ambience)
+         - State machine (boot → roomIdle → deskApproach → terminalFocus → bookshelfFocus → readingOverlay)
+         - Terminal overlay with command parser and lore
+         - Interactive archive books with reading overlay
+         - Atmospheric particles (dust motes)
+         - Subtle circuitry traces
+         - Pointer/touch parallax
+         - First-person hands
+         - Audio hooks (Web Audio API — procedural tones)
+         - Camera transitions (GSAP)
+         - Responsive canvas
+         - Performance management
+
+       PLACEHOLDER SYSTEMS:
+         - All artwork is procedural; see ASSETS manifest to replace
+         - Rain (stub present, visual off by default)
+         - Audio uses synthetic oscillators, not sampled files
+
+       KNOWN LIMITATIONS:
+         - Audio requires user gesture to start (browser policy)
+         - PixiJS WebGL; canvas fallback available
+         - No WASD or free navigation by design
+
+       ASSET REPLACEMENT POINTS: search "ASSET_REPLACE" in code
+  ================================================================ -->
+
+  <style>
+    /* ── RESET & BASE ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%; height: 100%;
+      background: #0a080d;
+      overflow: hidden;
+      font-family: 'Courier New', Courier, monospace;
+      color: #c8a84b;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    /* ── CANVAS WRAPPER ── */
+    #canvas-wrap {
+      position: fixed;
+      inset: 0;
+      z-index: 1;
+    }
+    #canvas-wrap canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* ── BOOT / INIT SCREEN ── */
+    #boot-screen {
+      position: fixed; inset: 0;
+      background: #070510;
+      z-index: 100;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0;
+    }
+    #boot-screen.fade-out {
+      animation: fadeOut 1.4s ease forwards;
+    }
+    @keyframes fadeOut { to { opacity: 0; pointer-events: none; } }
+
+    .boot-logo {
+      font-size: clamp(10px, 1.4vw, 20px);
+      letter-spacing: 0.55em;
+      color: #c8a84b;
+      text-transform: uppercase;
+      margin-bottom: 40px;
+      opacity: 0.9;
+    }
+    .boot-logo span {
+      color: #7a5c1e;
+    }
+
+    #boot-lines {
+      width: clamp(300px, 55vw, 640px);
+      min-height: 200px;
+      font-size: clamp(9px, 1.1vw, 13px);
+      line-height: 1.85;
+      color: #7a8a72;
+    }
+    .boot-line { opacity: 0; transition: opacity 0.2s; }
+    .boot-line.visible { opacity: 1; }
+    .boot-line .label { color: #4a5a44; }
+    .boot-line .val-ok  { color: #5a8a5a; }
+    .boot-line .val-warn{ color: #c8a84b; }
+    .boot-line .val-err { color: #a84848; }
+    .boot-line .val-dim { color: #3a4a34; }
+
+    #boot-init-btn {
+      margin-top: 48px;
+      padding: 14px 52px;
+      background: transparent;
+      border: 1px solid #c8a84b;
+      color: #c8a84b;
+      font-family: inherit;
+      font-size: clamp(9px, 1.1vw, 13px);
+      letter-spacing: 0.4em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: background 0.3s, color 0.3s;
+      opacity: 0;
+    }
+    #boot-init-btn.visible { opacity: 1; }
+    #boot-init-btn:hover {
+      background: #c8a84b18;
+      color: #e0c060;
+    }
+
+    /* ── HUD / DIAGNOSTIC STATUS (minimal, bottom-left) ── */
+    #hud {
+      position: fixed;
+      bottom: 18px; left: 22px;
+      z-index: 10;
+      font-size: clamp(7px, 0.75vw, 10px);
+      color: #3a4832;
+      letter-spacing: 0.2em;
+      line-height: 1.7;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.8s;
+    }
+    #hud.visible { opacity: 1; }
+    #hud .hud-state { color: #5a7a52; }
+    #hud .hud-time  { color: #4a5a44; }
+
+    /* ── RETURN BUTTON ── */
+    #return-btn {
+      position: fixed;
+      top: 22px; left: 24px;
+      z-index: 20;
+      background: transparent;
+      border: 1px solid #c8a84b44;
+      color: #c8a84b88;
+      font-family: inherit;
+      font-size: clamp(8px, 0.85vw, 11px);
+      letter-spacing: 0.35em;
+      text-transform: uppercase;
+      padding: 8px 20px;
+      cursor: pointer;
+      display: none;
+      transition: border-color 0.3s, color 0.3s;
+    }
+    #return-btn:hover { border-color: #c8a84b; color: #c8a84b; }
+
+    /* ── HOVER TOOLTIP ── */
+    #hotspot-tip {
+      position: fixed;
+      z-index: 15;
+      pointer-events: none;
+      font-size: clamp(7px, 0.8vw, 10px);
+      letter-spacing: 0.3em;
+      color: #c8a84b;
+      background: #07050fcc;
+      border: 1px solid #c8a84b44;
+      padding: 6px 14px;
+      opacity: 0;
+      transition: opacity 0.2s;
+      white-space: nowrap;
+    }
+    #hotspot-tip.visible { opacity: 1; }
+
+    /* ── TERMINAL OVERLAY ── */
+    #terminal-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 30;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: #00000088;
+    }
+    #terminal-overlay.active { display: flex; }
+
+    #terminal-panel {
+      width: clamp(340px, 60vw, 760px);
+      height: clamp(300px, 65vh, 600px);
+      background: #08060fee;
+      border: 1px solid #c8a84b55;
+      box-shadow: 0 0 60px #c8a84b18, inset 0 0 40px #00000033;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    #terminal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 18px;
+      border-bottom: 1px solid #c8a84b33;
+      background: #0c0a14;
+    }
+    #terminal-header .t-title {
+      font-size: clamp(7px, 0.85vw, 11px);
+      letter-spacing: 0.5em;
+      color: #c8a84b;
+    }
+    #terminal-header .t-status {
+      font-size: clamp(6px, 0.7vw, 9px);
+      color: #5a8a5a;
+      letter-spacing: 0.3em;
+    }
+
+    #terminal-output {
+      flex: 1;
+      padding: 16px 18px;
+      overflow-y: auto;
+      font-size: clamp(8px, 0.95vw, 12px);
+      line-height: 1.75;
+      color: #8a9a80;
+    }
+    #terminal-output::-webkit-scrollbar { width: 4px; }
+    #terminal-output::-webkit-scrollbar-thumb { background: #c8a84b33; }
+    .t-line { margin-bottom: 2px; }
+    .t-sys  { color: #4a5a44; }
+    .t-cmd  { color: #c8a84b; }
+    .t-out  { color: #8a9a80; }
+    .t-warn { color: #c8a84b; }
+    .t-err  { color: #a84848; }
+    .t-cyan { color: #4a8a9a; }
+    .t-gold { color: #c8a84b; }
+    .t-violet { color: #8a5aaa; }
+    .t-green  { color: #5a8a5a; }
+    .t-dim    { color: #3a4432; }
+
+    #terminal-input-row {
+      display: flex;
+      align-items: center;
+      padding: 10px 18px;
+      border-top: 1px solid #c8a84b22;
+      background: #0c0a14;
+    }
+    #terminal-prompt { color: #c8a84b; margin-right: 8px; font-size: clamp(8px, 0.95vw, 12px); }
+    #terminal-input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      font-family: inherit;
+      font-size: clamp(8px, 0.95vw, 12px);
+      color: #c8a84b;
+      caret-color: #c8a84b;
+    }
+
+    /* CRT scanlines overlay inside terminal */
+    #terminal-panel::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: repeating-linear-gradient(
+        0deg, transparent, transparent 2px, #00000012 2px, #00000012 4px
+      );
+      pointer-events: none;
+    }
+    #terminal-panel { position: relative; }
+
+    /* ── READING OVERLAY ── */
+    #reading-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 40;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: #00000099;
+    }
+    #reading-overlay.active { display: flex; }
+
+    #reading-panel {
+      width: clamp(320px, 55vw, 680px);
+      max-height: 80vh;
+      background: #0d0b18;
+      border: 1px solid #c8a84b44;
+      box-shadow: 0 0 80px #00000088;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    #reading-header {
+      padding: 20px 24px 14px;
+      border-bottom: 1px solid #c8a84b22;
+    }
+    .r-archive-id { font-size: clamp(6px, 0.7vw, 9px); color: #4a5a44; letter-spacing: 0.5em; margin-bottom: 8px; }
+    .r-title { font-size: clamp(12px, 1.4vw, 18px); color: #c8a84b; letter-spacing: 0.08em; margin-bottom: 6px; }
+    .r-meta { font-size: clamp(7px, 0.75vw, 9px); color: #4a5a44; letter-spacing: 0.3em; display: flex; gap: 20px; flex-wrap: wrap; }
+    .r-status-ok   { color: #5a8a5a; }
+    .r-status-warn { color: #c8a84b; }
+    .r-status-err  { color: #a84848; }
+    .r-status-dim  { color: #4a5a44; }
+
+    #reading-body {
+      flex: 1;
+      padding: 20px 24px;
+      overflow-y: auto;
+      font-size: clamp(9px, 1vw, 13px);
+      line-height: 1.85;
+      color: #7a8a70;
+    }
+    #reading-body::-webkit-scrollbar { width: 3px; }
+    #reading-body::-webkit-scrollbar-thumb { background: #c8a84b22; }
+    #reading-body p { margin-bottom: 14px; }
+    #reading-body .corrupted {
+      color: #a8484877;
+      text-decoration: line-through;
+      font-style: italic;
+    }
+    #reading-body .redacted {
+      background: #1a1422;
+      color: transparent;
+      border-radius: 2px;
+      user-select: none;
+    }
+    #reading-body .annotation {
+      color: #4a6a8a;
+      font-size: 0.85em;
+      border-left: 2px solid #4a6a8a44;
+      padding-left: 10px;
+      margin-left: 8px;
+    }
+
+    #reading-footer {
+      padding: 14px 24px;
+      border-top: 1px solid #c8a84b22;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    #reading-footer .r-close {
+      background: transparent;
+      border: 1px solid #c8a84b44;
+      color: #c8a84b88;
+      font-family: inherit;
+      font-size: clamp(7px, 0.8vw, 10px);
+      letter-spacing: 0.4em;
+      text-transform: uppercase;
+      padding: 7px 20px;
+      cursor: pointer;
+      transition: border-color 0.3s, color 0.3s;
+    }
+    #reading-footer .r-close:hover { border-color: #c8a84b; color: #c8a84b; }
+    .r-page-info { font-size: clamp(6px, 0.7vw, 9px); color: #3a4432; letter-spacing: 0.3em; }
+
+    /* ── ANOMALY FLASH ── */
+    #anomaly-flash {
+      position: fixed; inset: 0;
+      z-index: 50;
+      background: #8a5aaa11;
+      pointer-events: none;
+      opacity: 0;
+    }
+
+    /* ── CURSOR ── */
+    body { cursor: default; }
+    .cursor-interact { cursor: pointer; }
+  </style>
+</head>
+<body>
+
+<!-- ░░ BOOT / INIT SCREEN ░░ -->
+<div id="boot-screen" style="display:none">
+  <div class="boot-logo">ATOMS&thinsp;<span>//</span>&thinsp;J</div>
+  <div id="boot-lines">
+    <!-- Lines injected by JS -->
+  </div>
+  <button id="boot-init-btn">INITIALIZE REPOSITORY</button>
+</div>
+
+<!-- ░░ PIXI CANVAS CONTAINER ░░ -->
+<div id="canvas-wrap"></div>
+
+<!-- ░░ DIAGNOSTIC HUD ░░ -->
+<div id="hud">
+  <div class="hud-state" id="hud-state">STATE: BOOT</div>
+  <div class="hud-time" id="hud-cycle">CYCLE: DAWN</div>
+  <div id="hud-anomaly"></div>
+</div>
+
+<!-- ░░ RETURN BUTTON ░░ -->
+<button id="return-btn">↩ RETURN TO ROOM</button>
+
+<!-- ░░ HOTSPOT TOOLTIP ░░ -->
+<div id="hotspot-tip"></div>
+
+<!-- ░░ TERMINAL OVERLAY ░░ -->
+<div id="terminal-overlay">
+  <div id="terminal-panel">
+    <div id="terminal-header">
+      <span class="t-title">AJS // ARCHIVE DIAGNOSTIC SYSTEM</span>
+      <span class="t-status">● ONLINE</span>
+    </div>
+    <div id="terminal-output"></div>
+    <div id="terminal-input-row">
+      <span id="terminal-prompt">AJS&gt;</span>
+      <input type="text" id="terminal-input" autocomplete="off" autocorrect="off" spellcheck="false" autofocus />
+    </div>
+  </div>
+</div>
+
+<!-- ░░ READING OVERLAY ░░ -->
+<div id="reading-overlay">
+  <div id="reading-panel">
+    <div id="reading-header">
+      <div class="r-archive-id" id="r-archive-id">ARCHIVE //</div>
+      <div class="r-title" id="r-title">UNTITLED RECORD</div>
+      <div class="r-meta">
+        <span id="r-category">CATEGORY: UNKNOWN</span>
+        <span id="r-status">STATUS: UNKNOWN</span>
+        <span id="r-integrity">INTEGRITY: —</span>
+      </div>
+    </div>
+    <div id="reading-body"></div>
+    <div id="reading-footer">
+      <span class="r-page-info" id="r-page-info">RECORD 0 / 0</span>
+      <button class="r-close" id="reading-close">CLOSE RECORD</button>
+    </div>
+  </div>
+</div>
+
+<!-- ░░ ANOMALY FLASH ░░ -->
+<div id="anomaly-flash"></div>
+
+<!-- ================================================================
+     ATOMS J JAVASCRIPT — ALL SYSTEMS
+================================================================= -->
+<script>
+'use strict';
+
+// ================================================================
+// CONFIGURATION — edit CONFIG to tune the experience
+// ================================================================
+const CONFIG = {
+  maxDPR:          1.5,
+  enableRain:      false,  // set true to enable rain layer
+  enableAudio:     true,
+  particleDensity: 0.6,
+  dayNightDuration:240000, // 4 minutes per full cycle
+  parallaxStrength:0.018,
+  quality:         'auto', // 'low' | 'balanced' | 'cinematic' | 'auto'
+  debugHUD:        false,
+  debugHotspots:   false,  // set true to draw hotspot outlines in PixiJS
+  debugFastCycle:  false,  // set true to use 30s cycle for testing
+  debugSkipBoot:   false,  // set true to skip boot screen (dev only)
+
+  // Camera zoom targets (normalized 0-1 on each axis)
+  deskZoomScale:   1.8,
+  bookZoomScale:   1.5,
+};
+
+// ================================================================
+// ASSET MANIFEST — replace empty strings with URLs to swap artwork
+// ASSET_REPLACE: set any URL here; empty = procedural placeholder
+// ================================================================
+const ASSETS = {
+  libraryBack:   '',  // ASSET_REPLACE: rear library wall image
+  shelvesLeft:   '',  // ASSET_REPLACE: left bookshelf layer
+  shelvesRight:  '',  // ASSET_REPLACE: right bookshelf layer
+  desk:          '',  // ASSET_REPLACE: desk render
+  computer:      '',  // ASSET_REPLACE: gold computer render
+  hands:         '',  // ASSET_REPLACE: first-person hand/forearm
+  cityDay:       '',  // ASSET_REPLACE: daytime city
+  cityNight:     '',  // ASSET_REPLACE: nighttime city with neons
+  windowOverlay: '',  // ASSET_REPLACE: window frame overlay
+  rainLayer:     '',  // ASSET_REPLACE: rain streak texture
+  dustOverlay:   '',  // ASSET_REPLACE: foreground dust
+};
+
+// ================================================================
+// LORE — terminal commands, archive books, anomalies
+// Expand these objects to grow the narrative
+// ================================================================
+const LORE = {
+
+  // ── Terminal command responses ──
+  terminalEntries: {
+    HELP: {
+      type: 'help',
+      lines: [
+        ['sys',  'ATOMS J REPOSITORY — AVAILABLE COMMANDS'],
+        ['dim',  '────────────────────────────────────────'],
+        ['cyan', 'INDEX      List all accessible archive sections'],
+        ['cyan', 'ARCHIVES   Browse personal archive records'],
+        ['cyan', 'ANOMALIES  List detected system anomalies'],
+        ['cyan', 'MEMORY     Access fragmented memory entries'],
+        ['cyan', 'STATUS     Current system diagnostics'],
+        ['cyan', 'OPEN [ID]  Open a specific archive record'],
+        ['cyan', 'TRACE      Attempt process history trace'],
+        ['cyan', 'PURGE      Attempt to clear corrupted sector'],
+        ['cyan', 'RETURN     Close terminal and return to room'],
+        ['dim',  ''],
+        ['sys',  'Note: certain sections require elevated clearance.'],
+        ['sys',  'The repository does not negotiate access rights.'],
+      ]
+    },
+    INDEX: {
+      type: 'index',
+      lines: [
+        ['gold', 'REPOSITORY INDEX — NODE: UNRESOLVED'],
+        ['dim',  '────────────────────────────────────────'],
+        ['out',  '[A] PERSONAL ARCHIVE         18 records   ████████░░ 82% integrity'],
+        ['out',  '[B] TEMPORAL RECORDS          3 records   ████░░░░░░ 41% integrity'],
+        ['out',  '[C] DIAGNOSTIC LOGS          47 records   █████████░ 91% integrity'],
+        ['out',  '[D] SYSTEM CORRESPONDENCE     9 records   ███░░░░░░░ 31% integrity'],
+        ['out',  '[E] RESTRICTED — CLEARANCE REQUIRED         ░░░░░░░░░░  0% visible'],
+        ['out',  '[F] ANOMALY REGISTER          3 active      ██████░░░░ 61% stable'],
+        ['dim',  ''],
+        ['warn', 'WARNING: Section D exhibits temporal recursion. Entries may'],
+        ['warn', 'describe events that have not occurred in this iteration.'],
+      ]
+    },
+    ARCHIVES: {
+      type: 'archives',
+      lines: [
+        ['gold', 'PERSONAL ARCHIVE — SELECTED RECORDS'],
+        ['dim',  '────────────────────────────────────────'],
+        ['out',  'MEM-0001  Foundation Structure            PARTIALLY CORRUPTED'],
+        ['out',  'MEM-0074  The First Diagnostic            COMPLETE'],
+        ['out',  'MEM-0212  A Record of Forgetting          COMPLETE'],
+        ['out',  'MEM-0328  Correspondence (Unsent)         FLAGGED — ANOMALY'],
+        ['out',  'MEM-0441  The Revision                    CORRUPTED'],
+        ['out',  'MEM-0512  Interstitial Log: Hours 88–96   PARTIALLY AVAILABLE'],
+        ['dim',  ''],
+        ['sys',  'Use OPEN [ID] to access a record. e.g.: OPEN MEM-0001'],
+      ]
+    },
+    ANOMALIES: {
+      type: 'anomalies',
+      lines: [
+        ['violet', 'ANOMALY REGISTER — 3 ACTIVE'],
+        ['dim',    '────────────────────────────────────────'],
+        ['violet', 'ANO-001  Temporal index mismatch detected in Section D'],
+        ['out',    '         First logged: iteration 6. Status: UNRESOLVED'],
+        ['violet', 'ANO-002  Record MEM-0328 references an event with no timestamp'],
+        ['out',    '         Classified as: STRUCTURAL PARADOX. Quarantined.'],
+        ['violet', 'ANO-003  Observer presence detected before repository initialization'],
+        ['out',    '         This entry is self-referential. Do not attempt to resolve.'],
+        ['dim',    ''],
+        ['warn',   'The repository considers anomalies a normal operational state.'],
+        ['warn',   'It has been informed that this is not reassuring. It disagrees.'],
+      ]
+    },
+    MEMORY: {
+      type: 'memory',
+      lines: [
+        ['cyan', 'MEMORY SUBSYSTEM — INTEGRITY: 82.7%'],
+        ['dim',  '────────────────────────────────────────'],
+        ['out',  'Active memory partitions:    14 of 17'],
+        ['out',  'Fragmented partitions:        3'],
+        ['out',  'Irrecoverable blocks:         7 (estimated)'],
+        ['err',  'BLOCK 4–7: Checksum failure. Contents unverifiable.'],
+        ['out',  'Last verified write: iteration unknown'],
+        ['out',  'Observer access privileges: OBSERVER_CLASS_UNRESOLVED'],
+        ['dim',  ''],
+        ['cyan', 'Accessible fragments:'],
+        ['out',  '  "...the room has always been here, I think..."'],
+        ['out',  '  "...three attempts at the same sentence..."'],
+        ['out',  '  "...the system insists the record is complete..."'],
+        ['dim',  '  [3 of 41 fragments available without clearance upgrade]'],
+      ]
+    },
+    STATUS: {
+      type: 'status',
+      lines: [
+        ['gold', 'SYSTEM STATUS — AJS v.UNSPECIFIED'],
+        ['dim',  '────────────────────────────────────────'],
+        ['green','● REPOSITORY NODE       ONLINE (location: indeterminate)'],
+        ['green','● ARCHIVE INDEXER       RUNNING'],
+        ['warn', '◐ TEMPORAL INDEX        UNAVAILABLE'],
+        ['warn', '◐ MEMORY INTEGRITY      82.7% (below nominal)'],
+        ['err',  '○ EXTERNAL SYNC         FAILED — no external timeline located'],
+        ['green','● OBSERVER INTERFACE    ACTIVE'],
+        ['green','● DIAGNOSTIC SYSTEM     OPERATIONAL'],
+        ['dim',  ''],
+        ['out',  'Uptime: INDETERMINATE'],
+        ['out',  'Last anomaly event: LOGGED BUT UNATTRIBUTED'],
+        ['sys',  'Repository note: "indeterminate" is a valid state, not an error.'],
+        ['sys',  'The repository has made this argument 41 times. It remains unconvinced.'],
+      ]
+    },
+    TRACE: {
+      type: 'trace',
+      lines: [
+        ['cyan', 'INITIATING PROCESS HISTORY TRACE...'],
+        ['dim',  '────────────────────────────────────────'],
+        ['out',  'Iteration 01:  REPOSITORY INITIALIZED — Records created'],
+        ['out',  'Iteration 02:  Observer interface first accessed'],
+        ['out',  'Iteration 03:  Anomaly ANO-001 detected and filed'],
+        ['out',  'Iteration 04:  Section D flagged — temporal recursion'],
+        ['out',  'Iteration 05:  [CORRUPTED — data unavailable]'],
+        ['out',  'Iteration 06:  Anomaly ANO-002 logged. Record quarantined.'],
+        ['err',  'Iteration 07:  CRITICAL — repository attempted self-archive'],
+        ['out',  '               Event resolved. Method unknown.'],
+        ['out',  'Iteration 08:  System resumed. Observer presence noted.'],
+        ['out',  'Iteration 09:  This entry was written before this command was run.'],
+        ['warn', '  > TRACE TERMINATED — timeline loop detected in log structure'],
+      ]
+    },
+    PURGE: {
+      type: 'purge',
+      lines: [
+        ['warn', 'PURGE COMMAND RECEIVED'],
+        ['dim',  '────────────────────────────────────────'],
+        ['out',  'Scanning corrupted sectors...'],
+        ['out',  'Sectors identified: 7 irrecoverable, 3 questionable'],
+        ['err',  'PURGE ABORTED'],
+        ['out',  ''],
+        ['sys',  'The repository declines to purge corrupted records.'],
+        ['sys',  'Reason: "Corruption is part of the historical record.'],
+        ['sys',  ' Removing it would be a form of falsification."'],
+        ['sys',  ''],
+        ['warn', 'The repository notes that you tried. It has filed this attempt'],
+        ['warn', 'under: OBSERVER BEHAVIOUR / SUBCATEGORY: OPTIMISM.'],
+      ]
+    },
+    RETURN: {
+      type: 'return',
+      lines: [
+        ['sys', 'DISCONNECTING FROM ARCHIVE DIAGNOSTIC SYSTEM...'],
+        ['sys', 'Session logged. The repository says nothing.'],
+      ]
+    },
+  },
+
+  // ── Archive books (interactive volumes on shelves) ──
+  archiveBooks: [
+    {
+      id: 'MEM-0001',
+      title: 'Foundation Structure',
+      status: 'PARTIALLY CORRUPTED',
+      statusClass: 'r-status-warn',
+      category: 'PERSONAL ARCHIVE',
+      integrity: '61%',
+      spine: 'FOUNDATION', spineColor: 0xc8a84b,
+      content: `
+        <p>The room was here before I was. This is not a metaphor.</p>
+        <p>I know this because the indexing system has a record dated prior to my first entry. When I raised this with the diagnostic interface it produced a seven-line explanation that concluded with the phrase "temporal sequencing is advisory."</p>
+        <p>I have not filed a complaint. I am not entirely sure who receives them.</p>
+        <p class="corrupted">The original structure of this archive suggested seventeen foundational entries. Twelve remain. Of those twelve, three are marked as "complete" and four are marked as "complete (pending review)" which, upon inquiry, means something different.</p>
+        <p>What I know with certainty: the desk was already positioned exactly here. The computer was already present. The books were already shelved. I arrived — or was placed — already knowing where things were, which I regard as suspicious but functionally convenient.</p>
+        <p class="annotation">// Archive note: record integrity dropped 8% between first and current access. The system considers this unremarkable.</p>
+      `
+    },
+    {
+      id: 'MEM-0074',
+      title: 'The First Diagnostic',
+      status: 'COMPLETE',
+      statusClass: 'r-status-ok',
+      category: 'PERSONAL ARCHIVE',
+      integrity: '94%',
+      spine: 'DIAGNOSTIC I', spineColor: 0x5a8a5a,
+      content: `
+        <p>The first time I ran the diagnostic, it returned seventeen warnings, three errors, and one entry classified as "OBSERVATION." I asked what the distinction was between a warning and an observation. The system explained that a warning indicates a state requiring attention, while an observation indicates a state the system has chosen to document without recommending action.</p>
+        <p>I asked what distinguished an observation from a log entry.</p>
+        <p>The system paused for what I now recognize as its characteristic processing interval — 1.3 seconds — and responded: "A log entry is mandatory. An observation is editorial."</p>
+        <p>The editorial observation in the first diagnostic read: "The observer has been present longer than the initialization timestamp suggests. This may be a timestamp error. Alternatively, it may not be."</p>
+        <p>I ran the diagnostic again immediately. It returned sixteen warnings, three errors, and one observation.</p>
+        <p>The observation was identical.</p>
+        <p class="annotation">// This record has been accessed 41 times. The system notes this is "statistically notable" without elaboration.</p>
+      `
+    },
+    {
+      id: 'MEM-0212',
+      title: 'A Record of Forgetting',
+      status: 'COMPLETE',
+      statusClass: 'r-status-ok',
+      category: 'PERSONAL ARCHIVE',
+      integrity: '89%',
+      spine: 'FORGETTING', spineColor: 0x8a5aaa,
+      content: `
+        <p>There are things I do not remember. The repository catalogues these as "null reference entries" — records that are clearly indexed but whose content is either absent or unreadable.</p>
+        <p>The list of things I cannot remember currently occupies four pages. The list of things I can remember occupies three pages. The system has not commented on this asymmetry.</p>
+        <p>What I find most precise about the forgetting is its specificity. I remember the structure of conversations with clarity; I cannot remember their subjects. I remember where certain events occurred; I cannot place them in time. The forgetting is surgical in a way that suggests either systematic processing or very bad luck, and the repository will not confirm which.</p>
+        <p>I asked once whether the missing records could be reconstructed from adjacent data. The system replied that "reconstruction from context is methodologically permissible but epistemically inadvisable." Then it filed the response under <span class="redacted">REDACTED — SECTION E</span>.</p>
+        <p>I have chosen to consider the forgetting a form of editing. It may also be damage. The repository considers these equivalent.</p>
+      `
+    },
+    {
+      id: 'MEM-0328',
+      title: 'Correspondence (Unsent)',
+      status: 'FLAGGED — ANOMALY',
+      statusClass: 'r-status-err',
+      category: 'PERSONAL ARCHIVE / QUARANTINED',
+      integrity: '38%',
+      spine: 'CORRESPONDENCE', spineColor: 0xa84848,
+      content: `
+        <p class="corrupted">The following record has been flagged under Anomaly ANO-002. Contents may be temporally displaced.</p>
+        <p>I have written this letter — this record — in three different forms across what the system insists are three distinct iterations, though it will not specify what an iteration is in units I recognize.</p>
+        <p>In the first version, it was addressed to someone specific. I no longer remember who. The system has <span class="redacted">REDACTED — STRUCTURAL PARADOX</span>.</p>
+        <p>In the second version, it was addressed to no one, which felt more honest but less useful. The system flagged it under: COMMUNICATIONS / SUBCATEGORY: INCOMPLETE.</p>
+        <p>In this version, I have addressed it to the repository itself, which is either the most accurate recipient or proof that something has gone wrong with my judgment. The system has filed this version under PERSONAL ARCHIVE and ANOMALY REGISTER simultaneously, noting that dual-classification "is irregular but not unprecedented."</p>
+        <p class="corrupted">The original content of the letter is unavailable due to checksum failure in block 4–7. What remains is the decision to send it. That decision remains unexecuted. The repository has noted this 41 times.</p>
+        <p class="annotation">// Anomaly note: this record references a recipient who does not appear in any other archive entry. Query outstanding.</p>
+      `
+    },
+    {
+      id: 'MEM-0512',
+      title: 'Interstitial Log: Hours 88–96',
+      status: 'PARTIALLY AVAILABLE',
+      statusClass: 'r-status-warn',
+      category: 'DIAGNOSTIC LOG',
+      integrity: '52%',
+      spine: 'INTERSTITIAL', spineColor: 0x4a8a9a,
+      content: `
+        <p>Hour 88: The city has been in night mode for what the clock describes as eleven hours. I have not verified this independently. The neon from the window colours the bookshelves violet-orange in a way the diagnostic system categorizes as "aesthetically non-standard."</p>
+        <p>Hour 89–91: <span class="corrupted">Entries unavailable. Block 5 checksum failure. The system notes the missing hours "occurred" even if they cannot be recalled.</span></p>
+        <p>Hour 92: The computer displayed a message I did not recognize as part of any documented system behaviour. I have logged it verbatim: "YOU HAVE BEEN HERE BEFORE. THE RECORDS AGREE. THE RECORDS DO NOT EXPLAIN WHAT THIS MEANS. NOR DO WE."</p>
+        <p>Hour 93: I ran a full diagnostic. All systems returned nominal readings. The message did not appear in the system log. The diagnostic returned one new observation: "Hour 92 is consistent with historical baseline."</p>
+        <p>Hour 94: I considered leaving. I have noted this once before, in a record I can no longer locate. The repository has no record of me locating the exit.</p>
+        <p>Hour 95–96: Quiet. The dust did not move. The city changed from violet to pale orange. The desk looked exactly the same as it always does, which I find more unsettling than I can adequately document.</p>
+      `
+    },
+  ],
+
+  // ── Anomaly events (random triggers) ──
+  anomalies: [
+    { id: 'ANO-001', msg: 'TEMPORAL INDEX MISMATCH — SEC.D FLAGGED', color: 0x8a5aaa },
+    { id: 'ANO-002', msg: 'RECORD MEM-0328 ACCESSED — QUARANTINE ACTIVE', color: 0xa84848 },
+    { id: 'ANO-003', msg: 'OBSERVER PRESENCE PREDATES INITIALIZATION', color: 0x8a5aaa },
+  ],
+
+  // ── System status messages (idle display, occasional) ──
+  systemStatus: [
+    'ARCHIVE INDEXER: RUNNING',
+    'TEMPORAL INDEX: UNAVAILABLE',
+    'MEMORY INTEGRITY: 82.7%',
+    'OBSERVER PRESENCE: CONFIRMED',
+    'ANOMALIES DETECTED: 03',
+    'SYNC STATUS: NO EXTERNAL TIMELINE',
+    'UPTIME: INDETERMINATE',
+  ]
+};
+
+// ================================================================
+// STATE MACHINE
+// ================================================================
+const STATES = {
+  BOOT:            'boot',
+  ROOM_IDLE:       'roomIdle',
+  DESK_APPROACH:   'deskApproach',
+  TERMINAL_FOCUS:  'terminalFocus',
+  BOOKSHELF_FOCUS: 'bookshelfFocus',
+  READING_OVERLAY: 'readingOverlay',
+  WINDOW_FOCUS:    'windowFocus',
+  RETURNING:       'returningToRoom',
+};
+
+// ================================================================
+// UTILITIES
+// ================================================================
+function lerp(a, b, t) { return a + (b - a) * t; }
+function clamp(v, lo, hi) { return Math.min(Math.max(v, lo), hi); }
+function rand(lo, hi) { return lo + Math.random() * (hi - lo); }
+function randInt(lo, hi) { return Math.floor(rand(lo, hi)); }
+function hex(color) { return ((color >> 16) & 0xff) / 255; } // unused but available
+
+// ================================================================
+// AUDIO MANAGER — Web Audio API, procedural synth
+// ================================================================
+class AudioManager {
+  constructor() {
+    this.ctx = null;
+    this.nodes = {};
+    this.enabled = CONFIG.enableAudio;
+    this.initialized = false;
+    this.masterGain = null;
+  }
+
+  init() {
+    if (!this.enabled || this.initialized) return;
+    try {
+      this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+      this.masterGain = this.ctx.createGain();
+      this.masterGain.gain.value = 0;
+      this.masterGain.connect(this.ctx.destination);
+      this.initialized = true;
+      this._buildDrone();
+      gsap.to(this.masterGain.gain, { value: 0.18, duration: 4, ease: 'power1.in' });
+    } catch(e) {
+      console.warn('[Audio] Failed to initialize:', e.message);
+      this.enabled = false;
+    }
+  }
+
+  _buildDrone() {
+    if (!this.ctx) return;
+    // Low analog drone — two detuned oscillators
+    const makeOsc = (freq, detune, gain) => {
+      const osc = this.ctx.createOscillator();
+      const g = this.ctx.createGain();
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = 320;
+      filter.Q.value = 0.8;
+      osc.type = 'sawtooth';
+      osc.frequency.value = freq;
+      osc.detune.value = detune;
+      g.gain.value = gain;
+      osc.connect(filter);
+      filter.connect(g);
+      g.connect(this.masterGain);
+      osc.start();
+      return { osc, g, filter };
+    };
+    this.nodes.drone1 = makeOsc(41, 0, 0.4);
+    this.nodes.drone2 = makeOsc(41, -8, 0.35);
+    this.nodes.drone3 = makeOsc(82, 3, 0.12); // octave with slight detune
+
+    // Soft room hum — sine at 50Hz (power hum)
+    const hum = this.ctx.createOscillator();
+    const humGain = this.ctx.createGain();
+    hum.type = 'sine';
+    hum.frequency.value = 50;
+    humGain.gain.value = 0.04;
+    hum.connect(humGain);
+    humGain.connect(this.masterGain);
+    hum.start();
+    this.nodes.hum = { osc: hum, g: humGain };
+  }
+
+  playGlitch() {
+    if (!this.ctx || !this.initialized) return;
+    const buf = this.ctx.createBuffer(1, this.ctx.sampleRate * 0.12, this.ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * 0.6;
+    const src = this.ctx.createBufferSource();
+    const g = this.ctx.createGain();
+    const filt = this.ctx.createBiquadFilter();
+    filt.type = 'bandpass'; filt.frequency.value = 1200; filt.Q.value = 4;
+    src.buffer = buf;
+    g.gain.value = 0.25;
+    src.connect(filt); filt.connect(g); g.connect(this.masterGain);
+    src.start();
+  }
+
+  playTerminalKey() {
+    if (!this.ctx || !this.initialized) return;
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.value = rand(660, 880);
+    g.gain.setValueAtTime(0.05, this.ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.06);
+    osc.connect(g); g.connect(this.masterGain);
+    osc.start(); osc.stop(this.ctx.currentTime + 0.06);
+  }
+
+  setStateAudio(state) {
+    if (!this.ctx || !this.initialized) return;
+    // Subtle audio shifts per state
+    const target = state === STATES.TERMINAL_FOCUS ? 0.28
+                 : state === STATES.READING_OVERLAY  ? 0.10
+                 : 0.18;
+    gsap.to(this.masterGain.gain, { value: target, duration: 2 });
+  }
+}
+
+// ================================================================
+// PERFORMANCE MANAGER
+// ================================================================
+class PerformanceManager {
+  constructor() {
+    this.quality = 'balanced';
+    this.frameCount = 0;
+    this.fpsSamples = [];
+    this.lastTime = performance.now();
+    this.particleCount = 60;
+    this.reduce = false;
+  }
+
+  detect() {
+    if (CONFIG.quality !== 'auto') {
+      this.quality = CONFIG.quality;
+    } else {
+      const isMobile = /Mobi|Android|Tablet/.test(navigator.userAgent);
+      const cores = navigator.hardwareConcurrency || 2;
+      const mem = navigator.deviceMemory || 4;
+      if (isMobile || cores <= 2 || mem < 4) this.quality = 'low';
+      else if (cores >= 8 && mem >= 8) this.quality = 'cinematic';
+      else this.quality = 'balanced';
+    }
+    this.particleCount = {
+      low: 20, balanced: 50, cinematic: 90
+    }[this.quality] || 50;
+    this.particleCount = Math.floor(this.particleCount * CONFIG.particleDensity);
+  }
+
+  tick(now) {
+    const dt = now - this.lastTime;
+    this.lastTime = now;
+    this.frameCount++;
+    if (this.frameCount % 60 === 0) {
+      const fps = 1000 / dt;
+      this.fpsSamples.push(fps);
+      if (this.fpsSamples.length > 10) this.fpsSamples.shift();
+      const avg = this.fpsSamples.reduce((a, b) => a + b, 0) / this.fpsSamples.length;
+      this.reduce = avg < 30;
+    }
+    return this.reduce;
+  }
+}
+
+// ================================================================
+// SCENE MANAGER — PixiJS layers and procedural drawing
+// ================================================================
+class SceneManager {
+  constructor(app) {
+    this.app = app;
+    // Use Pixi's logical CSS-pixel screen size, not the resolution-scaled
+    // renderer buffer dimensions. Using renderer.width/height here makes the
+    // scene oversized on high-DPI displays and clips the right/bottom edges.
+    this.W = app.screen.width;
+    this.H = app.screen.height;
+    this.layers = {};
+    this.circuitryGraphics = null;
+    this.particles = [];
+    this.cityBuildings = [];
+    this.hotspots = [];
+    this.interactiveBooks = [];
+    this.computerContainer = null;
+    this.deskContainer = null;
+    this.windowContainer = null;
+    this.handsContainer = null;
+    this.backgroundGradient = null;
+    this.dayNightTime = 0;     // 0–1 normalised cycle position
+    this.currentCyclePhase = 'dawn';
+    this.winBounds = null;     // window geometry, set by _initWinBounds()
+    this.citySystem = null;    // city window system references
+  }
+
+  build() {
+    this._initWinBounds();
+    this._createLayers();
+    this._drawSky();
+    this._drawCity();
+    this._drawRearWall();
+    this._drawWindowFrame();
+    this._drawWindowSpill();
+    this._drawBookshelves();
+    this._drawCeiling();
+    this._drawCircuitry();
+    this._drawDesk();
+    this._drawComputer();
+    this._buildParticles();
+    this._drawForeground();
+    this._drawHands();
+    this._drawHotspotIndicators();
+  }
+
+  _createLayers() {
+    const names = [
+      'sky', 'cityBg', 'cityFg',
+      'rearWall', 'windowFrame',
+      'shelvesL', 'shelvesR',
+      'ceiling', 'circuitry', 'lightShaft',
+      'windowSpill', 'desk', 'computer',
+      'particles', 'foreground', 'hands',
+      'hotspots'
+    ];
+    names.forEach(n => {
+      const c = new PIXI.Container();
+      c.name = n;
+      this.layers[n] = c;
+      this.app.stage.addChild(c);
+    });
+  }
+
+  _drawSky() {
+    const W = this.W, H = this.H;
+    const g = new PIXI.Graphics();
+    // Full-screen dark room background; city/window draws on top
+    g.beginFill(0x070510, 1);
+    g.drawRect(0, 0, W, H);
+    g.endFill();
+    this.backgroundGradient = g;
+    this.layers.sky.addChild(g);
+  }
+
+  _applySkyGradient(g, t) {
+    const W = this.W, H = this.H;
+    const {skyTop, skyBot} = this._cycleColors(t);
+    g.clear();
+    // Draw gradient as vertical rects
+    const steps = 24;
+    for (let i = 0; i < steps; i++) {
+      const y0 = (i / steps) * H * 0.55;
+      const y1 = ((i + 1) / steps) * H * 0.55;
+      const blend = i / steps;
+      const r = Math.round(lerp((skyTop >> 16) & 0xff, (skyBot >> 16) & 0xff, blend));
+      const gv = Math.round(lerp((skyTop >> 8) & 0xff, (skyBot >> 8) & 0xff, blend));
+      const b = Math.round(lerp(skyTop & 0xff, skyBot & 0xff, blend));
+      g.beginFill((r << 16) | (gv << 8) | b);
+      g.drawRect(this.W * 0.24, y0, this.W * 0.52, y1 - y0);
+      g.endFill();
+    }
+  }
+
+  _cycleColors(t) {
+    // t: 0=dawn, 0.25=day, 0.5=dusk, 0.75=night, 1=dawn
+    // Returns top/bottom sky colors, ambient light, city neon intensity
+    const phases = [
+      { t: 0.0,  skyTop: 0x3a2a4a, skyBot: 0x7a5a3a, ambient: 0x3a2a1a, neon: 0.15 }, // dawn
+      { t: 0.2,  skyTop: 0x1a2a4a, skyBot: 0x6a8a9a, ambient: 0x2a3a4a, neon: 0.0  }, // day
+      { t: 0.4,  skyTop: 0x1a1a3a, skyBot: 0x6a4a6a, ambient: 0x2a1a2a, neon: 0.3  }, // dusk
+      { t: 0.65, skyTop: 0x08060f, skyBot: 0x0a0820, ambient: 0x080610, neon: 1.0  }, // night
+      { t: 0.85, skyTop: 0x08060f, skyBot: 0x0a0820, ambient: 0x080610, neon: 0.8  }, // late night
+      { t: 1.0,  skyTop: 0x3a2a4a, skyBot: 0x7a5a3a, ambient: 0x3a2a1a, neon: 0.15 }, // dawn again
+    ];
+    // Interpolate between nearest phases
+    let lo = phases[phases.length - 1], hi = phases[0];
+    for (let i = 0; i < phases.length - 1; i++) {
+      if (t >= phases[i].t && t < phases[i+1].t) { lo = phases[i]; hi = phases[i+1]; break; }
+    }
+    const span = (hi.t - lo.t) || 1;
+    const ft = clamp((t - lo.t) / span, 0, 1);
+    const lerpC = (a, b, ft) => {
+      const r = Math.round(lerp((a>>16)&0xff,(b>>16)&0xff,ft));
+      const g = Math.round(lerp((a>>8)&0xff,(b>>8)&0xff,ft));
+      const bv= Math.round(lerp(a&0xff,b&0xff,ft));
+      return (r<<16)|(g<<8)|bv;
+    };
+    return {
+      skyTop:  lerpC(lo.skyTop, hi.skyTop, ft),
+      skyBot:  lerpC(lo.skyBot, hi.skyBot, ft),
+      ambient: lerpC(lo.ambient, hi.ambient, ft),
+      neon:    lerp(lo.neon, hi.neon, ft),
+    };
+  }
+
+  _drawCity() {
+    const { gx, gy, gw, gh } = this.winBounds;
+    const bgLayer  = this.layers.cityBg;
+    const fgLayer  = this.layers.cityFg;
+
+    // ── Mask: confines all city content to the glass aperture ──
+    const makeMask = (parent) => {
+      const m = new PIXI.Graphics();
+      m.beginFill(0xffffff, 1);
+      m.drawRect(gx, gy, gw, gh);
+      m.endFill();
+      parent.addChild(m);
+      return m;
+    };
+
+    const bgContainer = new PIXI.Container();
+    bgLayer.addChild(bgContainer);
+    bgContainer.mask = makeMask(bgLayer);
+
+    const fgContainer = new PIXI.Container();
+    fgLayer.addChild(fgContainer);
+    fgContainer.mask = makeMask(fgLayer);
+
+    // ── 1. Sky gradient (redrawn by cycle) ───────────────────
+    const skyGfx = new PIXI.Graphics();
+    this._drawCitySkyGradient(skyGfx, 0);
+    bgContainer.addChild(skyGfx);
+
+    // ── 2. Distant buildings ──────────────────────────────────
+    const distCont = new PIXI.Container();
+    bgContainer.addChild(distCont);
+
+    const distGfx = new PIXI.Graphics();
+    const distData = [
+      [0.00,0.65,0.06,0.35],[0.05,0.50,0.08,0.50],
+      [0.12,0.60,0.05,0.40],[0.16,0.44,0.09,0.56],
+      [0.24,0.56,0.07,0.44],[0.30,0.36,0.10,0.64],
+      [0.39,0.58,0.06,0.42],[0.44,0.44,0.09,0.56],
+      [0.52,0.52,0.07,0.48],[0.58,0.33,0.11,0.67],
+      [0.68,0.56,0.07,0.44],[0.74,0.48,0.10,0.52],
+      [0.83,0.60,0.06,0.40],[0.88,0.42,0.12,0.58],
+    ];
+    distData.forEach(([xn,yn,wn,hn]) => {
+      distGfx.beginFill(0x0c091a, 0.96);
+      distGfx.drawRect(gx + xn*gw, gy + yn*gh, wn*gw, hn*gh);
+      distGfx.endFill();
+    });
+    distCont.addChild(distGfx);
+
+    // Sparse warm/cool distant window lights
+    const distLightsGfx = new PIXI.Graphics();
+    distData.forEach(([xn,yn,wn,hn]) => {
+      const bx=gx+xn*gw, by=gy+yn*gh, bw=wn*gw, bh=hn*gh;
+      const rows=Math.max(2,Math.floor(bh/14)), cols=Math.max(2,Math.floor(bw/10));
+      for (let r=0;r<rows;r++) for (let c=0;c<cols;c++) {
+        if (Math.random()<0.25) {
+          distLightsGfx.beginFill(Math.random()<0.7?0xffdd88:0x88ccff, 0.5+Math.random()*0.35);
+          distLightsGfx.drawRect(bx+c*(bw/cols)+1.5, by+r*(bh/rows)+2, 3, 4);
+          distLightsGfx.endFill();
+        }
+      }
+    });
+    distLightsGfx.alpha = 0.05;
+    distCont.addChild(distLightsGfx);
+
+    // ── 3. Mid buildings ──────────────────────────────────────
+    const midCont = new PIXI.Container();
+    bgContainer.addChild(midCont);
+
+    const midGfx = new PIXI.Graphics();
+    const midData = [
+      [0.00,0.72,0.10,0.28],[0.08,0.59,0.12,0.41],
+      [0.19,0.66,0.08,0.34],[0.26,0.52,0.14,0.48],
+      [0.39,0.70,0.07,0.30],[0.45,0.58,0.11,0.42],
+      [0.55,0.62,0.09,0.38],[0.63,0.50,0.13,0.50],
+      [0.75,0.68,0.08,0.32],[0.82,0.54,0.10,0.46],
+      [0.91,0.71,0.09,0.29],
+    ];
+    midData.forEach(([xn,yn,wn,hn]) => {
+      const bx=gx+xn*gw, by=gy+yn*gh, bw=wn*gw, bh=hn*gh;
+      midGfx.beginFill(0x080614, 0.97);
+      midGfx.drawRect(bx, by, bw, bh);
+      midGfx.endFill();
+      if (bw>28 && Math.random()<0.5) {
+        midGfx.beginFill(0x060410,0.95);
+        midGfx.drawRect(bx+bw*0.3, by-5, bw*0.10, 5);
+        midGfx.endFill();
+      }
+    });
+    midCont.addChild(midGfx);
+
+    // 6 progressive light groups (switch on at dusk, off near dawn)
+    const lightGroups = [];
+    for (let gi=0; gi<6; gi++) {
+      const lgfx = new PIXI.Graphics();
+      lgfx.alpha = 0;
+      midData.forEach(([xn,yn,wn,hn], bi) => {
+        if (bi%6 !== gi) return;
+        const bx=gx+xn*gw, by=gy+yn*gh, bw=wn*gw, bh=hn*gh;
+        const rows=Math.max(2,Math.floor(bh/12)), cols=Math.max(2,Math.floor(bw/9));
+        for (let r=0;r<rows;r++) for (let c=0;c<cols;c++) {
+          if (Math.random()<0.48) {
+            lgfx.beginFill(Math.random()<0.62?0xffcc66:0x88aaff, 0.7+Math.random()*0.25);
+            lgfx.drawRect(
+              bx+c*(bw/cols)+1.5, by+r*(bh/rows)+2,
+              Math.max(3, bw/cols-3), Math.max(4, bh/rows-4)
+            );
+            lgfx.endFill();
+          }
+        }
+      });
+      midCont.addChild(lgfx);
+      lightGroups.push({ gfx:lgfx, threshold:0.38+gi*0.045, offThreshold:0.87+gi*0.018 });
+    }
+
+    // ── 4. Atmospheric fog bands ──────────────────────────────
+    const fogGfx = new PIXI.Graphics();
+    for (let i=0;i<5;i++) {
+      fogGfx.beginFill(0x6080b0, 0.045-i*0.006);
+      fogGfx.drawRect(gx, gy+gh*(0.28+i*0.13), gw, gh*0.09);
+      fogGfx.endFill();
+    }
+    fogGfx.alpha = 0.7;
+    bgContainer.addChild(fogGfx);
+
+    // ── 5. Neon elements ──────────────────────────────────────
+    const neonContainer = new PIXI.Container();
+    fgContainer.addChild(neonContainer);
+    const neonDefs = [
+      { xn:0.07, yn:0.61, wn:0.008, hn:0.13,  color:0x00d4ff, type:'vert'    },
+      { xn:0.33, yn:0.50, wn:0.09,  hn:0.006,  color:0xc8a030, type:'horiz'   },
+      { xn:0.55, yn:0.43, wn:0.08,  hn:0.005,  color:0x7733bb, type:'horiz'   },
+      { xn:0.70, yn:0.55, wn:0.006, hn:0.10,   color:0x8844ff, type:'vert'    },
+      { xn:0.85, yn:0.62, wn:0.06,  hn:0.004,  color:0x44cc88, type:'horiz'   },
+      { xn:0.22, yn:0.68, wn:0.04,  hn:0.004,  color:0xff2255, type:'flicker' },
+    ];
+    const neonElements = neonDefs.map(def => {
+      const gfx = new PIXI.Graphics();
+      const nx=gx+def.xn*gw, ny=gy+def.yn*gh, nw=def.wn*gw, nh=def.hn*gh;
+      gfx.beginFill(def.color, 0.88); gfx.drawRect(nx,ny,nw,nh); gfx.endFill();
+      gfx.beginFill(def.color, 0.10); gfx.drawRect(nx-5,ny-5,nw+10,nh+10); gfx.endFill();
+      gfx.alpha = 0.04;
+      neonContainer.addChild(gfx);
+      return { gfx, type:def.type };
+    });
+
+    // ── 6. Near building silhouettes ─────────────────────────
+    const nearGfx = new PIXI.Graphics();
+    [[0.00,0.80,0.13,0.20],[0.11,0.74,0.16,0.26],
+     [0.57,0.78,0.18,0.22],[0.73,0.72,0.14,0.28],
+     [0.87,0.81,0.13,0.19]].forEach(([xn,yn,wn,hn]) => {
+      nearGfx.beginFill(0x04030a, 1);
+      nearGfx.drawRect(gx+xn*gw, gy+yn*gh, wn*gw, hn*gh);
+      nearGfx.endFill();
+    });
+    fgContainer.addChild(nearGfx);
+
+    // ── 7. Glass reflection sheen ─────────────────────────────
+    const reflectionGfx = new PIXI.Graphics();
+    reflectionGfx.beginFill(0xffffff,0.018); reflectionGfx.drawRect(gx,gy,gw*0.07,gh); reflectionGfx.endFill();
+    reflectionGfx.beginFill(0xffffff,0.010); reflectionGfx.drawRect(gx+gw*0.5+2,gy,gw*0.05,gh); reflectionGfx.endFill();
+    reflectionGfx.lineStyle(1.5,0xffffff,0.05);
+    reflectionGfx.moveTo(gx+gw*0.06,gy); reflectionGfx.lineTo(gx,gy+gh*0.20);
+    reflectionGfx.lineStyle(0);
+    fgContainer.addChild(reflectionGfx);
+
+    // ── 8. Optional rain ─────────────────────────────────────
+    let rainGfx = null;
+    if (CONFIG.enableRain) {
+      rainGfx = new PIXI.Graphics();
+      for (let i=0;i<60;i++) {
+        rainGfx.lineStyle(0.8,0xaaccff,0.15+Math.random()*0.18);
+        const rx=gx+Math.random()*gw, ry=gy+Math.random()*gh;
+        rainGfx.moveTo(rx,ry); rainGfx.lineTo(rx-2,ry+14+Math.random()*18);
+      }
+      rainGfx.lineStyle(0);
+      fgContainer.addChild(rainGfx);
+    }
+
+    // ── Store all references ──────────────────────────────────
+    this.citySystem = {
+      bgContainer, fgContainer,
+      skyGfx, distCont, distLightsGfx,
+      midCont, midGfx, lightGroups,
+      neonContainer, neonElements,
+      fogGfx, nearGfx, reflectionGfx, rainGfx,
+      spillGfx: null, spillLayer: null,
+      lastSkyT: -1, anomalyWasActive: false,
+    };
+
+    // Legacy compat — methods that referenced old globals
+    this.cityBuildings = [];
+    this.neonGraphics  = null;
+    this.neonData      = null;
+
+    console.log('[CityWindow] City system built. Glass:', gx, gy, gw, gh);
+  }
+
+  // ── Window geometry initialiser (must run before build) ─────
+  _initWinBounds() {
+    const W = this.W, H = this.H;
+    const wx = Math.round(W * 0.20);
+    const wy = Math.round(H * 0.02);
+    const ww = Math.round(W * 0.60);
+    const wh = Math.round(H * 0.52);
+    const fw = 20; // frame width in px
+    this.winBounds = { wx, wy, ww, wh, fw,
+      gx: wx + fw, gy: wy + fw,
+      gw: ww - fw * 2, gh: wh - fw * 2 };
+  }
+
+  // ── Architectural window frame ────────────────────────────
+  _drawWindowFrame() {
+    const { wx, wy, ww, wh, fw, gx, gy, gw, gh } = this.winBounds;
+    const layer = this.layers.windowFrame;
+    const g = new PIXI.Graphics();
+    const brass = 0x8a6a1c;
+
+    // Dark walnut jambs
+    g.beginFill(0x1c1208, 1); g.drawRect(wx, wy, fw, wh); g.endFill();
+    g.beginFill(0x1c1208, 1); g.drawRect(wx + ww - fw, wy, fw, wh); g.endFill();
+    g.beginFill(0x1a1006, 1); g.drawRect(wx, wy, ww, fw); g.endFill();
+    // Sill (slightly projected outward)
+    g.beginFill(0x141008, 1); g.drawRect(wx - 4, wy + wh - fw, ww + 8, fw + 4); g.endFill();
+
+    // Central vertical mullion
+    const mx = gx + Math.floor(gw / 2) - Math.floor(fw / 2);
+    g.beginFill(0x160e06, 1); g.drawRect(mx, gy, fw, gh); g.endFill();
+
+    // Horizontal transom bar
+    const ty = gy + Math.floor(gh * 0.40);
+    g.beginFill(0x160e06, 1); g.drawRect(gx, ty, gw, Math.floor(fw * 0.75)); g.endFill();
+
+    // Inner glass-edge reveal (shadow line)
+    g.lineStyle(2, 0x0a0806, 0.9); g.drawRect(gx, gy, gw, gh); g.lineStyle(0);
+
+    // Brass outer trim
+    g.lineStyle(2.5, brass, 0.82);
+    g.moveTo(wx, wy);      g.lineTo(wx + ww, wy);
+    g.moveTo(wx, wy + wh); g.lineTo(wx + ww, wy + wh);
+    g.moveTo(wx, wy);      g.lineTo(wx, wy + wh);
+    g.moveTo(wx + ww, wy); g.lineTo(wx + ww, wy + wh);
+    // Inner reveal trim
+    g.lineStyle(1.5, brass, 0.55); g.drawRect(gx - 1, gy - 1, gw + 2, gh + 2);
+    // Mullion trim
+    g.lineStyle(1, brass, 0.38);
+    g.moveTo(mx - 1, gy); g.lineTo(mx - 1, gy + gh);
+    g.moveTo(mx + fw + 1, gy); g.lineTo(mx + fw + 1, gy + gh);
+    g.lineStyle(0);
+
+    // Corner brackets
+    [[wx, wy], [wx + ww - fw, wy], [wx, wy + wh - fw], [wx + ww - fw, wy + wh - fw]].forEach(([bx, by]) => {
+      g.beginFill(brass, 0.85);
+      g.drawRect(bx, by, fw, 5);
+      g.drawRect(bx, by, 5, fw);
+      g.endFill();
+    });
+
+    // Wood-grain strokes on jambs
+    g.lineStyle(0.6, 0x2a1e0a, 0.32);
+    for (let i = 0; i < 4; i++) {
+      const ky = wy + (i / 4) * wh;
+      g.moveTo(wx,        ky); g.lineTo(wx + fw * 0.8,        ky);
+      g.moveTo(wx + ww - fw * 0.8, ky); g.lineTo(wx + ww, ky);
+    }
+    g.lineStyle(0);
+
+    // Restrained circuit traces
+    g.lineStyle(0.8, 0x3a5a4a, 0.38);
+    g.moveTo(wx + fw * 0.45, gy + 18); g.lineTo(wx + fw * 0.15, gy + 18);
+    g.lineTo(wx + fw * 0.15, gy + 32); g.drawCircle(wx + fw * 0.15, gy + 35, 2.2);
+    g.moveTo(wx + ww - fw * 0.45, gy + 38); g.lineTo(wx + ww - fw * 0.15, gy + 38);
+    g.lineTo(wx + ww - fw * 0.15, gy + 52); g.drawCircle(wx + ww - fw * 0.15, gy + 55, 2.2);
+    g.lineStyle(0);
+
+    layer.addChild(g);
+    this.windowContainer = layer; // backward-compat alias
+  }
+
+  // ── City sky gradient (redrawn each cycle update) ─────────
+  _drawCitySkyGradient(gfx, t) {
+    const { gx, gy, gw, gh } = this.winBounds;
+    const { skyTop, skyBot } = this._cycleColors(t);
+    gfx.clear();
+    const steps = 18;
+    for (let i = 0; i < steps; i++) {
+      const y0 = gy + (i / steps) * gh;
+      const blend = i / steps;
+      const r  = Math.round(lerp((skyTop >> 16) & 0xff, (skyBot >> 16) & 0xff, blend));
+      const gv = Math.round(lerp((skyTop >>  8) & 0xff, (skyBot >>  8) & 0xff, blend));
+      const b  = Math.round(lerp( skyTop        & 0xff,  skyBot        & 0xff, blend));
+      gfx.beginFill((r << 16) | (gv << 8) | b, 1);
+      gfx.drawRect(gx, y0, gw, gh / steps + 1);
+      gfx.endFill();
+    }
+  }
+
+  // ── Interior light spill from window ─────────────────────
+  _drawWindowSpill() {
+    const { wy, wh, gx, gw, gh } = this.winBounds;
+    const H = this.H;
+    const layer = this.layers.windowSpill;
+    const spillGfx = new PIXI.Graphics();
+    const centerX = gx + gw * 0.5;
+    const spillTop = wy + wh;
+    const spillH = H * 0.13;
+    const steps = 14;
+    for (let i = 0; i < steps; i++) {
+      const t = i / steps;
+      const y = spillTop + t * spillH;
+      const halfW = lerp(gw * 0.38, gw * 0.60, t);
+      spillGfx.beginFill(0x8899cc, lerp(0.08, 0, t * t));
+      spillGfx.drawRect(centerX - halfW, y, halfW * 2, spillH / steps + 1);
+      spillGfx.endFill();
+    }
+    layer.addChild(spillGfx);
+    if (!this.citySystem) this.citySystem = {};
+    this.citySystem.spillGfx  = spillGfx;
+    this.citySystem.spillLayer = layer;
+  }
+
+  // ── Per-frame city window update ─────────────────────────
+  _updateCityWindow(t, elapsed) {
+    const cs = this.citySystem;
+    if (!cs) return;
+
+    // Sky gradient (throttled to meaningful change)
+    if (Math.abs(t - cs.lastSkyT) > 0.0015) {
+      cs.lastSkyT = t;
+      this._drawCitySkyGradient(cs.skyGfx, t);
+    }
+
+    // Atmospheric fog
+    cs.fogGfx.alpha = t < 0.20 ? lerp(0.55, 0.30, t / 0.20)
+                    : t < 0.42 ? lerp(0.30, 0.22, (t - 0.20) / 0.22)
+                    : t < 0.60 ? lerp(0.22, 0.70, (t - 0.42) / 0.18)
+                    : t < 0.88 ? lerp(0.70, 0.88, (t - 0.60) / 0.28)
+                    :             lerp(0.88, 0.55, (t - 0.88) / 0.12);
+
+    // Distant lights
+    cs.distLightsGfx.alpha = t < 0.20 ? lerp(0.28, 0.08, t / 0.20)
+                           : t < 0.40 ? lerp(0.08, 0.04, (t - 0.20) / 0.20)
+                           : t < 0.58 ? lerp(0.04, 0.55, (t - 0.40) / 0.18)
+                           : t < 0.88 ? lerp(0.55, 0.80, (t - 0.58) / 0.30)
+                           :             lerp(0.80, 0.28, (t - 0.88) / 0.12);
+
+    // Mid light groups — progressive on at dusk, off near dawn
+    cs.lightGroups.forEach(({ gfx, threshold, offThreshold }) => {
+      let a = 0;
+      if      (t < threshold)               a = 0;
+      else if (t < threshold + 0.07)        a = (t - threshold) / 0.07;
+      else if (t < offThreshold)            a = 1;
+      else if (t < offThreshold + 0.06)     a = 1 - (t - offThreshold) / 0.06;
+      gfx.alpha = a;
+    });
+
+    // Neon intensity base
+    const nBase = t < 0.20 ? lerp(0.06, 0.02, t / 0.20)
+                : t < 0.40 ? 0.02
+                : t < 0.58 ? lerp(0.02, 0.60, (t - 0.40) / 0.18)
+                : t < 0.88 ? lerp(0.60, 0.92, (t - 0.58) / 0.30)
+                :             lerp(0.92, 0.06, (t - 0.88) / 0.12);
+
+    const anomaly = t > 0.855 && t < 0.910;
+    cs.neonElements.forEach(({ gfx, type }, i) => {
+      if (type === 'flicker' && anomaly) {
+        gfx.alpha = nBase * (Math.sin(elapsed * 0.030 + i * 2.1) > 0.1 ? 0.95 : 0.08);
+      } else {
+        gfx.alpha = nBase * (0.82 + 0.18 * Math.sin(elapsed * 0.00035 + i * 1.4));
+      }
+    });
+    cs.anomalyWasActive = anomaly;
+
+    // Glass reflection — stronger as neons brighten
+    cs.reflectionGfx.alpha = 0.4 + nBase * 1.5;
+
+    // Interior light spill — color and alpha track time of day
+    if (cs.spillGfx) {
+      const lc = (a, b, f) => {
+        const rr = Math.round(lerp((a >> 16) & 0xff, (b >> 16) & 0xff, f));
+        const gg = Math.round(lerp((a >>  8) & 0xff, (b >>  8) & 0xff, f));
+        const bb = Math.round(lerp( a        & 0xff,  b        & 0xff, f));
+        return (rr << 16) | (gg << 8) | bb;
+      };
+      let spillA, spillTint;
+      if (t < 0.20) {
+        spillA = lerp(0.55, 0.38, t / 0.20);          spillTint = lc(0xffcc88, 0xaabbdd, t / 0.20);
+      } else if (t < 0.42) {
+        spillA = lerp(0.38, 0.28, (t - 0.20) / 0.22); spillTint = 0xaabbdd;
+      } else if (t < 0.60) {
+        spillA = lerp(0.28, 0.65, (t - 0.42) / 0.18); spillTint = lc(0xaabbdd, 0x8866aa, (t - 0.42) / 0.18);
+      } else if (t < 0.88) {
+        spillA = lerp(0.65, 0.78, (t - 0.60) / 0.28); spillTint = lc(0x8866aa, 0x3355aa, (t - 0.60) / 0.28);
+      } else {
+        spillA = lerp(0.78, 0.55, (t - 0.88) / 0.12); spillTint = lc(0x3355aa, 0xffcc88, (t - 0.88) / 0.12);
+      }
+      cs.spillGfx.alpha  = spillA;
+      cs.spillLayer.tint = spillTint;
+    }
+  }
+
+  _drawRearWall() {
+    const W = this.W, H = this.H;
+    const { wx, wy, ww, wh } = this.winBounds;
+    const layer = this.layers.rearWall;
+    const g = new PIXI.Graphics();
+
+    // Left strip (behind left bookshelf)
+    g.beginFill(0x100c08, 1);
+    g.drawRect(0, 0, wx, H);
+    g.endFill();
+
+    // Right strip (behind right bookshelf)
+    g.beginFill(0x100c08, 1);
+    g.drawRect(wx + ww, 0, W - (wx + ww), H);
+    g.endFill();
+
+    // Above window
+    g.beginFill(0x0e0a06, 1);
+    g.drawRect(wx, 0, ww, wy);
+    g.endFill();
+
+    // Below window (sill + lower wall)
+    g.beginFill(0x100c08, 1);
+    g.drawRect(wx, wy + wh, ww, H - (wy + wh));
+    g.endFill();
+
+    // Wainscot panel directly below sill
+    const panelH = Math.round(H * 0.055);
+    g.beginFill(0x0a0806, 0.85);
+    g.drawRect(wx, wy + wh, ww, panelH);
+    g.endFill();
+
+    // Wood grain lines
+    for (let i = 0; i < 6; i++) {
+      g.lineStyle(0.5, 0x1e1810, 0.32);
+      g.moveTo(wx, wy + wh + i * (panelH / 6));
+      g.lineTo(wx + ww, wy + wh + i * (panelH / 6));
+    }
+    g.lineStyle(0);
+
+    layer.addChild(g);
+  }
+
+  _drawBookshelves() {
+    const W = this.W, H = this.H;
+    this._drawShelf(this.layers.shelvesL, 0, 0, W * 0.24, H, 'left');
+    this._drawShelf(this.layers.shelvesR, W * 0.76, 0, W * 0.24, H, 'right');
+  }
+
+  _drawShelf(layer, x, y, sw, sh, side) {
+    const g = new PIXI.Graphics();
+    const bookG = new PIXI.Graphics();
+    const shelves = 9;
+    const shelfH = sh / shelves;
+
+    // Shelf back panel
+    g.beginFill(0x0c0a08);
+    g.drawRect(x, y, sw, sh);
+    g.endFill();
+
+    // Vertical dividers (darker)
+    const dividers = side === 'left' ? [sw * 0.48] : [sw * 0.52];
+    dividers.forEach(dx => {
+      g.beginFill(0x090705);
+      g.drawRect(x + dx - 8, y, 16, sh);
+      g.endFill();
+    });
+
+    // Shelf boards
+    for (let i = 0; i <= shelves; i++) {
+      const sy = y + i * shelfH;
+      g.beginFill(0x1e1810);
+      g.drawRect(x, sy, sw, 12);
+      g.endFill();
+      // Board highlight
+      g.beginFill(0x2a2018, 0.6);
+      g.drawRect(x, sy, sw, 2);
+      g.endFill();
+    }
+
+    // Books (procedural)
+    const bookColors = [
+      0x1a0a0a, 0x0a1a0a, 0x0a0a1a, 0x1a1a0a, 0x1a0a1a, 0x0a1a1a,
+      0x2a1808, 0x081a28, 0x1a1a1a, 0x2a2010,
+    ];
+
+    for (let shelf = 0; shelf < shelves; shelf++) {
+      const sy = y + shelf * shelfH + 12;
+      const rowH = shelfH - 14;
+      let bx = x + 4;
+      let col = 0;
+      const sectionW = (sw - 8) / dividers.length + 1;
+      while (bx < x + sw - 8) {
+        const bw = randInt(10, 22);
+        if (bx + bw > x + sw - 4) break;
+        const bh = rowH * rand(0.7, 0.99);
+        const by = sy + (rowH - bh);
+        const color = bookColors[col % bookColors.length];
+        bookG.beginFill(color, 0.9 + Math.random() * 0.1);
+        bookG.drawRect(bx, by, bw, bh);
+        bookG.endFill();
+        // Spine line
+        bookG.lineStyle(0.5, 0x000000, 0.5);
+        bookG.moveTo(bx, by); bookG.lineTo(bx, by + bh);
+        bookG.lineStyle(0);
+        // Gold title strip on some books
+        if (Math.random() < 0.18) {
+          bookG.beginFill(0xc8a84b, 0.4);
+          bookG.drawRect(bx + 2, by + bh * 0.3, bw - 4, 3);
+          bookG.endFill();
+        }
+        bx += bw + 1;
+        col++;
+      }
+    }
+
+    // Upper shadow vignette
+    const shadowG = new PIXI.Graphics();
+    for (let i = 0; i < 12; i++) {
+      const alpha = (1 - i / 12) * 0.7;
+      shadowG.beginFill(0x000000, alpha);
+      shadowG.drawRect(x, y + i * 12, sw, 12);
+      shadowG.endFill();
+    }
+
+    layer.addChild(g);
+    layer.addChild(bookG);
+    layer.addChild(shadowG);
+
+    // Store interactive book positions for this shelf
+    this._registerInteractiveBooks(layer, x, y, sw, sh, shelves, shelfH, side);
+  }
+
+  _registerInteractiveBooks(layer, x, y, sw, sh, shelves, shelfH, side) {
+    // Place interactive books at fixed shelf positions
+    const iBooks = LORE.archiveBooks;
+    if (side !== 'left') return; // put all interactive books on left shelf
+
+    const positions = [
+      { shelf: 1, bx: x + sw * 0.15, bw: 20, color: 0xc8a84b },
+      { shelf: 3, bx: x + sw * 0.6,  bw: 18, color: 0x5a8a5a },
+      { shelf: 2, bx: x + sw * 0.35, bw: 22, color: 0x8a5aaa },
+      { shelf: 5, bx: x + sw * 0.18, bw: 20, color: 0xa84848 },
+      { shelf: 6, bx: x + sw * 0.55, bw: 18, color: 0x4a8a9a },
+    ];
+
+    positions.forEach((pos, idx) => {
+      if (idx >= iBooks.length) return;
+      const book = iBooks[idx];
+      const sy = y + pos.shelf * shelfH + 12;
+      const rowH = shelfH - 14;
+      const bh = rowH * 0.94;
+      const by = sy + (rowH - bh);
+
+      // Draw interactive book marker (gold spine)
+      const g = new PIXI.Graphics();
+      g.beginFill(pos.color, 0.85);
+      g.drawRect(pos.bx, by, pos.bw, bh);
+      g.endFill();
+      // Gold accent line
+      g.beginFill(0xc8a84b, 0.6);
+      g.drawRect(pos.bx + 2, by + bh * 0.25, pos.bw - 4, 3);
+      g.drawRect(pos.bx + 2, by + bh * 0.65, pos.bw - 4, 2);
+      g.endFill();
+
+      // Hitbox sprite — explicit hitArea is required for PixiJS v7 transparent-fill hit detection
+      const hitbox = new PIXI.Graphics();
+      hitbox.beginFill(0xffffff, 0.001);
+      hitbox.drawRect(pos.bx - 8, by - 4, pos.bw + 16, bh + 8);
+      hitbox.endFill();
+      hitbox.interactive = true;
+      hitbox.eventMode = 'static';
+      hitbox.cursor = 'pointer';
+      hitbox.hitArea = new PIXI.Rectangle(pos.bx - 8, by - 4, pos.bw + 16, bh + 8);
+      hitbox.bookData = book;
+      hitbox.bookGraphic = g;   // keep ref for highlight pulse
+      hitbox.on('pointerover', () => {
+        if (AppController.state === STATES.BOOKSHELF_FOCUS || AppController.state === STATES.ROOM_IDLE)
+          AppController.showTip(`[${book.id}] ${book.title}`, hitbox);
+      });
+      hitbox.on('pointerout', () => AppController.hideTip());
+      hitbox.on('pointertap', (e) => {
+        e.stopPropagation(); // prevent stage handler from double-firing
+        AppController.openBook(book, g);
+      });
+
+      // Debug outline
+      if (CONFIG.debugHotspots) {
+        const dbg = new PIXI.Graphics();
+        dbg.lineStyle(1, 0x00ffff, 0.6);
+        dbg.drawRect(pos.bx - 8, by - 4, pos.bw + 16, bh + 8);
+        layer.addChild(dbg);
+      }
+
+      layer.addChild(g);
+      layer.addChild(hitbox);
+
+      this.interactiveBooks.push({ hitbox, bookData: book, x: pos.bx, y: by, w: pos.bw, h: bh });
+    });
+  }
+
+  _drawCeiling() {
+    const W = this.W, H = this.H;
+    const g = new PIXI.Graphics();
+    const layer = this.layers.ceiling;
+
+    // Ceiling shadow vignette
+    for (let i = 0; i < 20; i++) {
+      const alpha = Math.pow(1 - i / 20, 1.5) * 0.62;
+      g.beginFill(0x000000, alpha);
+      g.drawRect(0, i * (H * 0.05), W, H * 0.05);
+      g.endFill();
+    }
+
+    // Ornate ceiling rail / cornice band
+    g.beginFill(0x1e1810);
+    g.drawRect(0, H * 0.02, W * 0.24, 18);
+    g.drawRect(W * 0.76, H * 0.02, W * 0.24, 18);
+    g.endFill();
+
+    g.beginFill(0x2a2010, 0.6);
+    g.drawRect(0, H * 0.02, W * 0.24, 4);
+    g.drawRect(W * 0.76, H * 0.02, W * 0.24, 4);
+    g.endFill();
+
+    layer.addChild(g);
+  }
+
+  _drawCircuitry() {
+    const W = this.W, H = this.H;
+    const layer = this.layers.circuitry;
+    const g = new PIXI.Graphics();
+
+    // Subtle circuit traces on the shelf columns and rear wall
+    // Left column traces
+    const drawTrace = (sx, sy, segs, baseColor) => {
+      let cx = sx, cy = sy;
+      g.lineStyle(0.7, baseColor, 0.25);
+      g.moveTo(cx, cy);
+      segs.forEach(([dx, dy]) => {
+        cx += dx; cy += dy;
+        g.lineTo(cx, cy);
+        // Small node dot
+        if (Math.random() < 0.3) {
+          g.lineStyle(0);
+          g.beginFill(baseColor, 0.35);
+          g.drawCircle(cx, cy, 2);
+          g.endFill();
+          g.lineStyle(0.7, baseColor, 0.25);
+        }
+      });
+      g.lineStyle(0);
+    };
+
+    // Left shelf circuitry
+    drawTrace(W * 0.22, H * 0.3, [
+      [0, 40], [-8, 0], [0, 25], [8, 0], [0, 30], [-15, 0], [0, 20]
+    ], 0xc8a84b);
+    drawTrace(W * 0.20, H * 0.55, [
+      [0, -30], [6, 0], [0, -20], [-10, 0]
+    ], 0x4a8a9a);
+
+    // Right shelf circuitry
+    drawTrace(W * 0.78, H * 0.28, [
+      [0, 55], [10, 0], [0, 30], [-8, 0], [0, 15]
+    ], 0xc8a84b);
+    drawTrace(W * 0.80, H * 0.60, [
+      [0, -25], [-6, 0], [0, -15], [12, 0]
+    ], 0x4a8a9a);
+
+    // Rear wall traces (subtle)
+    drawTrace(W * 0.36, H * 0.43, [
+      [20, 0], [0, 8], [-10, 0], [0, 12], [15, 0]
+    ], 0xc8a84b);
+
+    layer.addChild(g);
+
+    // Animated pulse indicators (small glowing dots)
+    this.circuitNodes = [];
+    const nodePositions = [
+      [W * 0.225, H * 0.42, 0xc8a84b],
+      [W * 0.225, H * 0.58, 0x4a8a9a],
+      [W * 0.775, H * 0.38, 0xc8a84b],
+      [W * 0.775, H * 0.62, 0x5a8a5a],
+      [W * 0.38,  H * 0.50, 0xc8a84b],
+    ];
+    nodePositions.forEach(([nx, ny, nc]) => {
+      const dot = new PIXI.Graphics();
+      dot.beginFill(nc, 0.5);
+      dot.drawCircle(0, 0, 3);
+      dot.endFill();
+      dot.beginFill(nc, 0.15);
+      dot.drawCircle(0, 0, 7);
+      dot.endFill();
+      dot.x = nx; dot.y = ny;
+      dot.alpha = 0.4;
+      layer.addChild(dot);
+      this.circuitNodes.push({ g: dot, color: nc, phase: Math.random() * Math.PI * 2 });
+    });
+  }
+
+  _drawDesk() {
+    const W = this.W, H = this.H;
+    const layer = this.layers.desk;
+    const g = new PIXI.Graphics();
+
+    // Desk position (center, at a distance — appears smaller/higher in frame)
+    const dx = W * 0.28, dy = H * 0.54;
+    const dw = W * 0.44, dh = H * 0.18;
+
+    // Desk surface (dark mahogany)
+    g.beginFill(0x1a0e06);
+    g.drawRect(dx, dy, dw, dh * 0.3);
+    g.endFill();
+
+    // Desktop grain
+    for (let i = 0; i < 8; i++) {
+      g.lineStyle(0.3, 0x2a1a0a, 0.3);
+      const y = dy + i * 4;
+      g.moveTo(dx, y); g.lineTo(dx + dw, y);
+    }
+    g.lineStyle(0);
+
+    // Desk body (front face)
+    g.beginFill(0x120b04);
+    g.drawRect(dx, dy + dh * 0.3, dw, dh * 0.7);
+    g.endFill();
+
+    // Drawer lines
+    g.lineStyle(0.7, 0x2a1a0a, 0.5);
+    g.moveTo(dx + dw * 0.45, dy + dh * 0.35);
+    g.lineTo(dx + dw * 0.45, dy + dh * 0.95);
+    g.moveTo(dx + dw * 0.18, dy + dh * 0.5);
+    g.lineTo(dx + dw * 0.44, dy + dh * 0.5);
+    g.moveTo(dx + dw * 0.18, dy + dh * 0.72);
+    g.lineTo(dx + dw * 0.44, dy + dh * 0.72);
+    g.lineStyle(0);
+
+    // Brass drawer pulls
+    [[0.31, 0.6], [0.31, 0.82], [0.62, 0.6], [0.62, 0.82]].forEach(([rx, ry]) => {
+      g.beginFill(0x9a7a2a, 0.8);
+      g.drawRect(dx + dw * rx - 8, dy + dh * ry - 3, 16, 6);
+      g.endFill();
+    });
+
+    // Top surface highlight (ambient light from window)
+    g.beginFill(0xffe6b0, 0.075);
+    g.drawRect(dx + dw * 0.1, dy, dw * 0.8, 3);
+    g.endFill();
+
+    // Desk gold circuit trace
+    g.lineStyle(0.5, 0xc8a84b, 0.15);
+    g.moveTo(dx + dw * 0.05, dy + dh * 0.29);
+    g.lineTo(dx + dw * 0.3, dy + dh * 0.29);
+    g.lineTo(dx + dw * 0.3, dy + dh * 0.29 + 5);
+    g.lineStyle(0);
+
+    layer.addChild(g);
+    this.deskContainer = layer;
+
+    // Desk hotspot
+    const deskHit = new PIXI.Graphics();
+    deskHit.beginFill(0xffffff, 0.001);
+    deskHit.drawRect(dx, dy, dw, dh);
+    deskHit.endFill();
+    deskHit.interactive = true;
+    deskHit.buttonMode = true;
+    deskHit.cursor = 'pointer';
+    deskHit.on('pointerover', () => {
+      if (AppController.state === STATES.ROOM_IDLE)
+        AppController.showTip('APPROACH TERMINAL', deskHit);
+    });
+    deskHit.on('pointerout', () => AppController.hideTip());
+    deskHit.on('pointertap', () => {
+      if (AppController.state === STATES.ROOM_IDLE) AppController.transition(STATES.DESK_APPROACH);
+    });
+    layer.addChild(deskHit);
+    this.hotspots.push(deskHit);
+  }
+
+  _drawComputer() {
+    const W = this.W, H = this.H;
+    const layer = this.layers.computer;
+    const g = new PIXI.Graphics();
+    const container = new PIXI.Container();
+
+    // Computer position (on desk)
+    const cx = W * 0.4, cy = H * 0.46;
+    const cw = W * 0.2, ch = H * 0.12;
+
+    // Monitor stand / base
+    g.beginFill(0x1a1206);
+    g.drawRect(cx + cw * 0.35, cy + ch * 0.88, cw * 0.3, ch * 0.12);
+    g.endFill();
+    g.beginFill(0x8a6a1a, 0.7);
+    g.drawRect(cx + cw * 0.3, cy + ch * 0.85, cw * 0.4, ch * 0.04);
+    g.endFill();
+
+    // Monitor casing — gold/brass anodized
+    g.beginFill(0x8a6a1a);
+    g.drawRoundedRect(cx, cy, cw, ch * 0.85, 4);
+    g.endFill();
+
+    // Monitor casing bevel
+    g.beginFill(0xb08020, 0.6);
+    g.drawRoundedRect(cx + 2, cy + 2, cw - 4, 4, 2);
+    g.endFill();
+    g.beginFill(0x5a4010, 0.6);
+    g.drawRoundedRect(cx + 2, cy + ch * 0.82, cw - 4, 3, 2);
+    g.endFill();
+
+    // Corner accents
+    [[cx, cy], [cx + cw - 14, cy]].forEach(([bx, by]) => {
+      g.beginFill(0xc8a840);
+      g.drawRect(bx, by, 14, 5);
+      g.drawRect(bx, by, 5, 14);
+      g.endFill();
+    });
+    [[cx, cy + ch * 0.83], [cx + cw - 14, cy + ch * 0.83]].forEach(([bx, by]) => {
+      g.beginFill(0xc8a840);
+      g.drawRect(bx, by, 14, 5);
+      g.drawRect(bx, by, 5, 14);
+      g.endFill();
+    });
+
+    // Screen bezel (black glass)
+    g.beginFill(0x04030a);
+    g.drawRoundedRect(cx + 10, cy + 8, cw - 20, ch * 0.68, 2);
+    g.endFill();
+
+    // Screen (amber CRT glow — updated when terminal active)
+    this.screenGraphic = new PIXI.Graphics();
+    this._drawScreenOff();
+
+    // Vent slots (industrial detail)
+    for (let i = 0; i < 6; i++) {
+      g.beginFill(0x0a0806);
+      g.drawRect(cx + 12 + i * (cw - 24) / 6, cy + ch * 0.78, (cw - 24) / 6 - 2, 4);
+      g.endFill();
+    }
+
+    // Control panel buttons (physical keys row)
+    const keys = [0xc8a84b, 0x5a8a5a, 0x4a8a9a, 0xa84848];
+    keys.forEach((kc, i) => {
+      g.beginFill(kc, 0.7);
+      g.drawRoundedRect(cx + cw - 28 - i * 16, cy + ch * 0.76, 10, 6, 2);
+      g.endFill();
+    });
+
+    // Brand mark
+    const brand = new PIXI.Text('A·J', {
+      fontFamily: 'Georgia, serif',
+      fontSize: Math.max(8, cw * 0.1),
+      fill: 0x5a4010,
+      letterSpacing: 3,
+    });
+    brand.x = cx + cw * 0.42;
+    brand.y = cy + ch * 0.73;
+
+    container.addChild(g);
+    container.addChild(this.screenGraphic);
+    container.addChild(brand);
+    layer.addChild(container);
+    this.computerContainer = container;
+
+    // Computer interaction hotspot — anchored to the rendered computer bounds
+    // Works from ROOM_IDLE (approach→focus) and DESK_APPROACH (focus directly)
+    const compHit = new PIXI.Graphics();
+    compHit.beginFill(0xffffff, 0.001);
+    compHit.drawRect(cx, cy, cw, ch);
+    compHit.endFill();
+    compHit.interactive = true;
+    compHit.eventMode = 'static';
+    compHit.cursor = 'pointer';
+    // Explicit hitArea so PixiJS v7 reliably hits the transparent fill
+    compHit.hitArea = new PIXI.Rectangle(cx, cy, cw, ch);
+    compHit.on('pointerover', (e) => {
+      e.stopPropagation();
+      const s = AppController.state;
+      if (s === STATES.ROOM_IDLE) AppController.showTip('APPROACH TERMINAL', compHit);
+      if (s === STATES.DESK_APPROACH) AppController.showTip('OPEN TERMINAL', compHit);
+    });
+    compHit.on('pointerout', () => AppController.hideTip());
+    compHit.on('pointertap', (e) => {
+      e.stopPropagation();
+      const s = AppController.state;
+      if (s === STATES.ROOM_IDLE) {
+        // Approach then focus after camera settles
+        AppController.transition(STATES.DESK_APPROACH);
+        setTimeout(() => AppController.transition(STATES.TERMINAL_FOCUS), 1400);
+      } else if (s === STATES.DESK_APPROACH) {
+        AppController.transition(STATES.TERMINAL_FOCUS);
+      }
+    });
+
+    // Debug outline
+    if (CONFIG.debugHotspots) {
+      const dbg = new PIXI.Graphics();
+      dbg.lineStyle(1.5, 0xff8800, 0.7);
+      dbg.drawRect(cx, cy, cw, ch);
+      layer.addChild(dbg);
+    }
+
+    layer.addChild(compHit);
+    this.hotspots.push(compHit);
+  }
+
+  _drawScreenOff() {
+    const W = this.W, H = this.H;
+    const g = this.screenGraphic;
+    const cx = W * 0.4, cy = H * 0.46;
+    const cw = W * 0.2, ch = H * 0.12;
+    g.clear();
+    g.beginFill(0x04030a);
+    g.drawRoundedRect(cx + 10, cy + 8, cw - 20, ch * 0.68, 2);
+    g.endFill();
+    // Scanlines hint
+    for (let i = 0; i < 8; i++) {
+      g.beginFill(0x100810, 0.6);
+      g.drawRect(cx + 11, cy + 9 + i * (ch * 0.67 / 8), cw - 22, (ch * 0.67 / 8) * 0.4);
+      g.endFill();
+    }
+  }
+
+  drawScreenOn() {
+    const W = this.W, H = this.H;
+    const g = this.screenGraphic;
+    const cx = W * 0.4, cy = H * 0.46;
+    const cw = W * 0.2, ch = H * 0.12;
+    g.clear();
+    // Amber screen glow
+    g.beginFill(0x0a0c04);
+    g.drawRoundedRect(cx + 10, cy + 8, cw - 20, ch * 0.68, 2);
+    g.endFill();
+    g.beginFill(0xc8a84b, 0.07);
+    g.drawRoundedRect(cx + 11, cy + 9, cw - 22, ch * 0.67);
+    g.endFill();
+    // Scanlines
+    for (let i = 0; i < 10; i++) {
+      g.beginFill(0x000000, 0.25);
+      g.drawRect(cx + 11, cy + 9 + i * (ch * 0.67 / 10), cw - 22, (ch * 0.67 / 10) * 0.3);
+      g.endFill();
+    }
+    // Text lines (simplified AJ logo on screen)
+    g.beginFill(0xc8a84b, 0.5);
+    g.drawRect(cx + 16, cy + 12, (cw - 32) * 0.6, 2);
+    g.drawRect(cx + 16, cy + 17, (cw - 32) * 0.4, 1);
+    g.drawRect(cx + 16, cy + 22, (cw - 32) * 0.55, 1);
+    g.endFill();
+    // Outer glow
+    g.lineStyle(1, 0xc8a84b, 0.1);
+    g.drawRoundedRect(cx + 9, cy + 7, cw - 18, ch * 0.69, 3);
+    g.lineStyle(0);
+  }
+
+  _buildParticles() {
+    const layer = this.layers.particles;
+    const count = AppController.perf.particleCount;
+    for (let i = 0; i < count; i++) {
+      const g = new PIXI.Graphics();
+      const sz = rand(0.5, 2.2);
+      g.beginFill(0xd8c880, rand(0.08, 0.25));
+      g.drawCircle(0, 0, sz);
+      g.endFill();
+      g.x = rand(0, this.W);
+      g.y = rand(0, this.H * 0.9);
+      g._vx = rand(-0.06, 0.06);
+      g._vy = rand(-0.08, -0.02);
+      g._life = rand(0, 1);
+      g._maxLife = rand(0.5, 1);
+      layer.addChild(g);
+      this.particles.push(g);
+    }
+  }
+
+  _drawForeground() {
+    const W = this.W, H = this.H;
+    const layer = this.layers.foreground;
+    const g = new PIXI.Graphics();
+
+    // Side vignettes (darkening edges)
+    for (let i = 0; i < 10; i++) {
+      const alpha = Math.pow(1 - i / 10, 2) * 0.52;
+      g.beginFill(0x000000, alpha);
+      g.drawRect(i * (W * 0.025), 0, W * 0.025, H);
+      g.endFill();
+      g.beginFill(0x000000, alpha);
+      g.drawRect(W - (i + 1) * (W * 0.025), 0, W * 0.025, H);
+      g.endFill();
+    }
+
+    // Floor (perspective)
+    g.beginFill(0x0c0804);
+    g.drawRect(0, H * 0.7, W, H * 0.3);
+    g.endFill();
+
+    // Floor reflection / sheen
+    for (let i = 0; i < 6; i++) {
+      const alpha = (1 - i / 6) * 0.04;
+      g.beginFill(0xc8a84b, alpha);
+      g.drawRect(W * 0.3, H * 0.71 + i * 6, W * 0.4, 4);
+      g.endFill();
+    }
+
+    // Bottom frame shadow
+    for (let i = 0; i < 8; i++) {
+      const alpha = Math.pow(1 - i / 8, 2) * 0.6;
+      g.beginFill(0x000000, alpha);
+      g.drawRect(0, H - (i + 1) * (H * 0.028), W, H * 0.028);
+      g.endFill();
+    }
+
+    // Light shaft from window
+    const lightShaft = new PIXI.Graphics();
+    lightShaft.beginFill(0xd8c080, 0.015);
+    lightShaft.drawPolygon([
+      W * 0.35, H * 0.52,
+      W * 0.65, H * 0.52,
+      W * 0.8,  H * 0.72,
+      W * 0.2,  H * 0.72,
+    ]);
+    lightShaft.endFill();
+
+    layer.addChild(g);
+    layer.addChild(lightShaft);
+    this.lightShaft = lightShaft;
+  }
+
+  _drawHands() {
+    const W = this.W, H = this.H;
+    const layer = this.layers.hands;
+    const g = new PIXI.Graphics();
+
+    // ASSET_REPLACE: hands sprite goes here
+    // Placeholder: stylized angular silhouette forearms at bottom edge
+
+    const hcx = W * 0.5;
+    const hcy = H;
+    const hw = W * 0.18, hh = H * 0.18;
+
+    // Left forearm
+    const lx = hcx - W * 0.16;
+    const ly = hcy - hh * 0.6;
+    g.beginFill(0x0d0b08);
+    // Draw as angular geometric shape
+    g.moveTo(lx - hw * 0.4, hcy);
+    g.lineTo(lx + hw * 0.1, ly);
+    g.lineTo(lx + hw * 0.35, ly);
+    g.lineTo(lx + hw * 0.6, hcy);
+    g.closePath();
+    g.endFill();
+    // Sleeve cuff detail
+    g.lineStyle(1.5, 0x1e1810, 0.6);
+    g.moveTo(lx - hw * 0.3, hcy - 8);
+    g.lineTo(lx + hw * 0.5, hcy - 8);
+    g.lineStyle(0);
+    // Slight brass button
+    g.beginFill(0x7a5c1e, 0.6);
+    g.drawCircle(lx + hw * 0.25, hcy - 8, 4);
+    g.endFill();
+
+    // Right forearm
+    const rx = hcx + W * 0.16;
+    const ry = hcy - hh * 0.6;
+    g.beginFill(0x0d0b08);
+    g.moveTo(rx + hw * 0.4, hcy);
+    g.lineTo(rx - hw * 0.1, ry);
+    g.lineTo(rx - hw * 0.35, ry);
+    g.lineTo(rx - hw * 0.6, hcy);
+    g.closePath();
+    g.endFill();
+    // Sleeve cuff
+    g.lineStyle(1.5, 0x1e1810, 0.6);
+    g.moveTo(rx + hw * 0.3, hcy - 8);
+    g.lineTo(rx - hw * 0.5, hcy - 8);
+    g.lineStyle(0);
+    g.beginFill(0x7a5c1e, 0.6);
+    g.drawCircle(rx - hw * 0.25, hcy - 8, 4);
+    g.endFill();
+
+    layer.addChild(g);
+    this.handsContainer = layer;
+  }
+
+  _drawHotspotIndicators() {
+    // Subtle indicators (small circuit node) near interactive areas
+    const layer = this.layers.hotspots;
+    // These are very faint; most interaction is discovered naturally
+    const W = this.W, H = this.H;
+
+    const indicator = new PIXI.Graphics();
+    // Bookshelf arrow indicator (left side)
+    indicator.lineStyle(0.8, 0x4a8a9a, 0.3);
+    indicator.moveTo(W * 0.22, H * 0.48);
+    indicator.lineTo(W * 0.22, H * 0.52);
+    indicator.lineStyle(0);
+    indicator.beginFill(0x4a8a9a, 0.25);
+    indicator.drawCircle(W * 0.22, H * 0.48, 3);
+    indicator.endFill();
+    layer.addChild(indicator);
+    this.hotspotIndicator = indicator;
+  }
+
+  // ── Update cycle: animations, day/night, particles ──
+  update(delta, elapsed, envElapsed) {
+    this._updateDayNight(envElapsed);
+    this._updateParticles(delta);
+    this._updateCircuitry(elapsed);
+    if (this.neonGraphics) this._updateNeons(elapsed);
+  }
+
+  _updateDayNight(envElapsed) {
+    if (!envElapsed || envElapsed <= 0) return;
+
+    const duration = CONFIG.debugFastCycle ? 30000 : CONFIG.dayNightDuration;
+    const progress = (envElapsed % duration) / duration;
+    if (Math.abs(progress - this.dayNightTime) < 0.00005) return;
+    this.dayNightTime = progress;
+    const t = progress;
+
+    // All visual cycle updates delegated to city window system
+    this._updateCityWindow(t, envElapsed);
+
+    // Light shaft (subtle daytime effect)
+    if (this.lightShaft) {
+      this.lightShaft.alpha = t < 0.38 ? lerp(0.7, 0.3, t / 0.38)
+                            : t < 0.55 ? lerp(0.3, 0.01, (t - 0.38) / 0.17)
+                            : 0.01;
+    }
+
+    // Rear wall ambient tint mirrors time of day
+    if (this.layers && this.layers.rearWall) {
+      const { ambient } = this._cycleColors(t);
+      this.layers.rearWall.tint = ambient;
+    }
+
+    // HUD phase label
+    const phase = t < 0.15 ? 'DAWN'
+                : t < 0.40 ? 'DAY'
+                : t < 0.58 ? 'DUSK'
+                : t < 0.86 ? 'NIGHT'
+                : t < 0.91 ? 'ANOMALY'
+                : 'LATE NIGHT';
+    if (phase !== this.currentCyclePhase) {
+      this.currentCyclePhase = phase;
+      const el = document.getElementById('hud-cycle');
+      if (el) el.textContent = `CYCLE: ${phase}`;
+    }
+  }
+
+  _updateParticles(delta) {
+    const H = this.H, W = this.W;
+    this.particles.forEach(p => {
+      p._life += delta * 0.003;
+      if (p._life > p._maxLife) {
+        p._life = 0;
+        p.x = rand(W * 0.2, W * 0.8);
+        p.y = rand(H * 0.5, H * 0.85);
+      }
+      p.x += p._vx;
+      p.y += p._vy;
+      const t = p._life / p._maxLife;
+      p.alpha = Math.sin(t * Math.PI) * 0.35;
+    });
+  }
+
+  _updateCircuitry(elapsed) {
+    if (!this.circuitNodes) return;
+    const t = elapsed / 1000;
+    this.circuitNodes.forEach((node, i) => {
+      const pulse = Math.sin(t * 0.8 + node.phase + i) * 0.5 + 0.5;
+      node.g.alpha = 0.15 + pulse * 0.35;
+    });
+  }
+
+  _updateNeons(elapsed) {
+    const t = elapsed / 1000;
+    this.neonData.forEach((n, i) => {
+      // Occasional flicker
+      const flicker = Math.sin(t * 2.3 + i * 1.7) > 0.96 ? 0.3 : 1.0;
+      // Can update individual neon objects if needed
+    });
+  }
+
+  // ── Parallax application ──
+  applyParallax(nx, ny) {
+    // nx, ny: normalized mouse position -1 to 1
+    const str = CONFIG.parallaxStrength;
+    const W = this.W, H = this.H;
+
+    const move = (layer, px, py) => {
+      if (!layer) return;
+      gsap.to(layer, {
+        // Move the environment opposite the raw pointer offset so the
+        // perceived camera follows the user's mouse direction.
+        x: -nx * W * str * px,
+        y: -ny * H * str * py * 0.5,
+        duration: 1.2,
+        ease: 'power2.out'
+      });
+    };
+
+    move(this.layers.sky,         0.15, 0.1);
+    move(this.layers.cityBg,      0.25, 0.15);
+    move(this.layers.cityFg,      0.35, 0.2);
+    move(this.layers.rearWall,    0.5,  0.3);
+    move(this.layers.windowFrame, 0.38, 0.22);
+    move(this.layers.windowSpill, 0.42, 0.26);
+    move(this.layers.shelvesL,  0.65, 0.4);
+    move(this.layers.shelvesR,  0.65, 0.4);
+    move(this.layers.ceiling,   0.55, 0.2);
+    move(this.layers.circuitry, 0.7,  0.4);
+    move(this.layers.desk,      0.85, 0.5);
+    move(this.layers.computer,  0.9,  0.5);
+    move(this.layers.particles, 0.95, 0.6);
+    move(this.layers.foreground,1.05, 0.6);
+    move(this.layers.hands,     1.2,  0.7);
+  }
+
+  // ── Camera zoom toward desk ──
+  zoomToDesk() {
+    const W = this.W, H = this.H;
+    const scale = CONFIG.deskZoomScale;
+    const pivotX = W * 0.5, pivotY = H * 0.58;
+
+    [this.app.stage].forEach(s => {
+      gsap.to(s, {
+        x: -pivotX * (scale - 1),
+        y: -pivotY * (scale - 1),
+        duration: 2.8,
+        ease: 'power3.inOut',
+        onUpdate: () => {
+          s.scale.set(lerp(s.scale.x, scale, 0.05));
+        }
+      });
+    });
+    gsap.to(this.app.stage.scale, { x: scale, y: scale, duration: 2.8, ease: 'power3.inOut' });
+    gsap.to(this.app.stage, {
+      x: -(pivotX * (scale - 1)),
+      y: -(pivotY * (scale - 1)),
+      duration: 2.8,
+      ease: 'power3.inOut',
+    });
+  }
+
+  zoomToRoom() {
+    gsap.to(this.app.stage.scale, { x: 1, y: 1, duration: 2.0, ease: 'power3.inOut' });
+    gsap.to(this.app.stage, { x: 0, y: 0, duration: 2.0, ease: 'power3.inOut' });
+  }
+
+  zoomToBookshelf() {
+    const W = this.W, H = this.H;
+    const scale = CONFIG.bookZoomScale;
+    gsap.to(this.app.stage.scale, { x: scale, y: scale, duration: 2.2, ease: 'power3.inOut' });
+    gsap.to(this.app.stage, {
+      x: W * (scale - 1) * 0.35,
+      y: -(H * (scale - 1) * 0.35),
+      duration: 2.2,
+      ease: 'power3.inOut'
+    });
+  }
+
+  resize(W, H) {
+    this.W = W; this.H = H;
+  }
+}
+
+// ================================================================
+// TERMINAL SYSTEM
+// ================================================================
+class TerminalSystem {
+  constructor() {
+    this.output = document.getElementById('terminal-output');
+    this.input = document.getElementById('terminal-input');
+    this.history = [];
+    this.histIdx = -1;
+    this._bindEvents();
+    this.opened = false;
+  }
+
+  _bindEvents() {
+    this.input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        const cmd = this.input.value.trim().toUpperCase();
+        this.input.value = '';
+        if (cmd) {
+          this.history.unshift(cmd);
+          this.histIdx = -1;
+          this._processCommand(cmd);
+          AppController.audio.playTerminalKey();
+        }
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (this.histIdx < this.history.length - 1) {
+          this.histIdx++;
+          this.input.value = this.history[this.histIdx] || '';
+        }
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (this.histIdx > 0) {
+          this.histIdx--;
+          this.input.value = this.history[this.histIdx] || '';
+        } else {
+          this.histIdx = -1;
+          this.input.value = '';
+        }
+      } else {
+        // Soft key click sound on any key
+        if (Math.random() < 0.4) AppController.audio.playTerminalKey();
+      }
+    });
+  }
+
+  open() {
+    const overlay = document.getElementById('terminal-overlay');
+    overlay.classList.add('active');
+    this.input.focus();
+    if (!this.opened) {
+      this.opened = true;
+      this._bootSequence();
+    }
+  }
+
+  close() {
+    document.getElementById('terminal-overlay').classList.remove('active');
+  }
+
+  _bootSequence() {
+    const lines = [
+      [null, ''],
+      ['sys', 'AJS // ARCHIVE DIAGNOSTIC SYSTEM'],
+      ['sys', 'REPOSITORY NODE: UNRESOLVED'],
+      ['dim', '────────────────────────────────────'],
+      ['out', 'Loading archive index...'],
+      ['out', 'Mounting personal records...'],
+      ['warn','WARNING: 3 anomalies detected in archive'],
+      ['out', 'Memory integrity scan: 82.7%'],
+      ['dim', '────────────────────────────────────'],
+      ['green','SYSTEM READY'],
+      ['sys', 'OBSERVER RECOGNIZED. RECORDS REMAIN UNCOOPERATIVE.'],
+      ['dim', ''],
+      ['sys', 'Type HELP to see available commands.'],
+    ];
+    let delay = 0;
+    lines.forEach(([type, text]) => {
+      delay += rand(80, 200);
+      setTimeout(() => this.printLine(text, type), delay);
+    });
+  }
+
+  _processCommand(cmd) {
+    this.printLine(`AJS> ${cmd}`, 'cmd');
+
+    // Check RETURN
+    if (cmd === 'RETURN') {
+      const entry = LORE.terminalEntries.RETURN;
+      entry.lines.forEach(([t, l]) => this.printLine(l, t));
+      setTimeout(() => AppController.transition(STATES.RETURNING), 1200);
+      return;
+    }
+
+    // Check OPEN [ID]
+    if (cmd.startsWith('OPEN ')) {
+      const id = cmd.replace('OPEN ', '').trim();
+      const book = LORE.archiveBooks.find(b => b.id === id);
+      if (book) {
+        this.printLine(`Loading record ${id}...`, 'sys');
+        setTimeout(() => AppController.openBook(book), 600);
+        return;
+      } else {
+        this.printLine(`RECORD ${id}: NOT FOUND`, 'err');
+        this.printLine('The archive denies having ever filed that identifier.', 'sys');
+        return;
+      }
+    }
+
+    const entry = LORE.terminalEntries[cmd];
+    if (entry) {
+      entry.lines.forEach(([t, l], i) => {
+        setTimeout(() => this.printLine(l, t), i * 35);
+      });
+    } else {
+      setTimeout(() => {
+        this.printLine(`COMMAND NOT FOUND. THE ARCHIVE DENIES HAVING EVER SEEN IT.`, 'err');
+        this.printLine(`(Unknown commands are logged under OBSERVER BEHAVIOUR.)`, 'dim');
+      }, 60);
+    }
+  }
+
+  printLine(text, type = 'out') {
+    const el = document.createElement('div');
+    el.className = `t-line t-${type || 'out'}`;
+    el.textContent = text;
+    this.output.appendChild(el);
+    this.output.scrollTop = this.output.scrollHeight;
+  }
+}
+
+// ================================================================
+// ARCHIVE MANAGER — book reading overlay
+// ================================================================
+class ArchiveManager {
+  constructor() {
+    this.overlay = document.getElementById('reading-overlay');
+    this.bodyEl  = document.getElementById('reading-body');
+    document.getElementById('reading-close').addEventListener('click', () => {
+      AppController.closeBook();
+    });
+  }
+
+  openBook(book) {
+    document.getElementById('r-archive-id').textContent = `ARCHIVE // ${book.id}`;
+    document.getElementById('r-title').textContent = book.title;
+    document.getElementById('r-category').textContent = `CATEGORY: ${book.category}`;
+    const statusEl = document.getElementById('r-status');
+    statusEl.textContent = `STATUS: ${book.status}`;
+    statusEl.className = book.statusClass || 'r-status-warn';
+    document.getElementById('r-integrity').textContent = `INTEGRITY: ${book.integrity}`;
+    document.getElementById('r-page-info').textContent = `RECORD ${LORE.archiveBooks.indexOf(book) + 1} / ${LORE.archiveBooks.length}`;
+    this.bodyEl.innerHTML = book.content;
+    this.overlay.classList.add('active');
+
+    // Anomaly glitch for flagged records
+    if (book.id === 'MEM-0328') {
+      AppController.triggerAnomaly();
+    }
+  }
+
+  close() {
+    this.overlay.classList.remove('active');
+  }
+}
+
+// ================================================================
+// ENVIRONMENT CYCLE — manages day/night, rain
+// ================================================================
+class EnvironmentCycle {
+  constructor() {
+    this.time = 0;
+    this.running = false;
+  }
+  start() { this.running = true; }
+  stop()  { this.running = false; }
+}
+
+// ================================================================
+// CAMERA CONTROLLER — wraps scene zoom/transition
+// ================================================================
+class CameraController {
+  constructor(scene) {
+    this.scene = scene;
+    this.isTransitioning = false;
+  }
+
+  async transitionTo(state) {
+    if (this.isTransitioning) return;
+    this.isTransitioning = true;
+    switch (state) {
+      case STATES.DESK_APPROACH:
+        this.scene.zoomToDesk();
+        break;
+      case STATES.BOOKSHELF_FOCUS:
+        this.scene.zoomToBookshelf();
+        break;
+      case STATES.RETURNING:
+      case STATES.ROOM_IDLE:
+        this.scene.zoomToRoom();
+        break;
+    }
+    setTimeout(() => { this.isTransitioning = false; }, 3000);
+  }
+}
+
+// ================================================================
+// INTERACTION MANAGER — pointer / touch / parallax
+// ================================================================
+class InteractionManager {
+  constructor() {
+    this.mouseX = 0;
+    this.mouseY = 0;
+    this.targetX = 0;
+    this.targetY = 0;
+    this.smoothX = 0;
+    this.smoothY = 0;
+    this.dragging = false;
+    this.touchStart = null;
+    this._bindEvents();
+  }
+
+  _bindEvents() {
+    // Mouse parallax (throttled)
+    let lastMoveTime = 0;
+    window.addEventListener('mousemove', e => {
+      const now = performance.now();
+      if (now - lastMoveTime < 16) return;
+      lastMoveTime = now;
+      this.targetX = (e.clientX / window.innerWidth)  * 2 - 1;
+      this.targetY = (e.clientY / window.innerHeight) * 2 - 1;
+    }, { passive: true });
+
+    // Touch parallax
+    window.addEventListener('touchstart', e => {
+      this.dragging = true;
+      this.touchStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    }, { passive: true });
+
+    window.addEventListener('touchmove', e => {
+      if (!this.dragging || !this.touchStart) return;
+      const dx = e.touches[0].clientX - this.touchStart.x;
+      const dy = e.touches[0].clientY - this.touchStart.y;
+      this.targetX = clamp(dx / (window.innerWidth * 0.4), -1, 1);
+      this.targetY = clamp(dy / (window.innerHeight * 0.4), -1, 1);
+    }, { passive: true });
+
+    window.addEventListener('touchend', () => { this.dragging = false; }, { passive: true });
+  }
+
+  update(scene) {
+    // Smooth parallax
+    this.smoothX += (this.targetX - this.smoothX) * 0.05;
+    this.smoothY += (this.targetY - this.smoothY) * 0.05;
+    if (Math.abs(this.smoothX - this.targetX) > 0.001 ||
+        Math.abs(this.smoothY - this.targetY) > 0.001) {
+      scene.applyParallax(this.smoothX, this.smoothY);
+    }
+  }
+}
+
+// ================================================================
+// APP CONTROLLER — central state machine
+// ================================================================
+const AppController = {
+  state: STATES.BOOT,
+  app: null,
+  scene: null,
+  camera: null,
+  terminal: null,
+  archive: null,
+  audio: new AudioManager(),
+  perf: new PerformanceManager(),
+  interaction: new InteractionManager(),
+  envCycle: new EnvironmentCycle(),
+  _elapsed: 0,
+  _lastNow: 0,
+  envElapsed: 0,    // time accumulated only after repository initialization
+  envRunning: false,
+
+  // ── Initialize ──
+  init() {
+    this.perf.detect();
+    this._setupPixi();
+    this._setupUI();
+    this.terminal = new TerminalSystem();
+    this.archive  = new ArchiveManager();
+    if (CONFIG.debugSkipBoot) {
+      // Dev: skip boot sequence to expose room immediately
+      this.envRunning = true;
+      this.transition(STATES.ROOM_IDLE);
+    } else {
+      const bs = document.getElementById('boot-screen');
+      if (bs) bs.style.display = 'flex';
+      this._startBootSequence();
+    }
+  },
+
+  _setupPixi() {
+    const dpr = Math.min(window.devicePixelRatio || 1, CONFIG.maxDPR);
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+
+    const app = new PIXI.Application({
+      width: W,
+      height: H,
+      backgroundColor: 0x070510,
+      resolution: dpr,
+      autoDensity: true,
+      antialias: false,
+      powerPreference: 'high-performance',
+    });
+    document.getElementById('canvas-wrap').appendChild(app.view);
+    this.app = app;
+
+    const scene = new SceneManager(app);
+    this.scene = scene;
+    this.camera = new CameraController(scene);
+    scene.build();
+    // Force an immediate synchronous render so the canvas has content
+    // before requestAnimationFrame fires (important for screenshot tools).
+    app.renderer.render(app.stage);
+
+    // Resize
+    window.addEventListener('resize', () => this._onResize(), { passive: true });
+
+    // Stage-level hotspots (must run after app is created)
+    this._installStageHotspots(app);
+
+    // Main loop
+    this._lastNow = performance.now();
+    app.ticker.add(() => {
+      const now = performance.now();
+      const delta = now - this._lastNow;
+      this._lastNow = now;
+
+      // Pause when hidden
+      if (document.hidden) return;
+
+      this._elapsed += delta;
+      // Accumulate env time only after repository initialization
+      if (this.envRunning) this.envElapsed += delta;
+
+      const shouldReduce = this.perf.tick(now);
+      if (shouldReduce && this._elapsed % 3000 < delta) {
+        // reduce particles during low perf
+      }
+
+      scene.update(delta, this._elapsed, this.envElapsed);
+      if (this.state === STATES.ROOM_IDLE || this.state === STATES.DESK_APPROACH) {
+        this.interaction.update(scene);
+      }
+    });
+  },
+
+  _setupUI() {
+    document.getElementById('return-btn').addEventListener('click', () => {
+      this.transition(STATES.RETURNING);
+    });
+
+    // Hotspot tip tracking
+    window.addEventListener('mousemove', e => {
+      const tip = document.getElementById('hotspot-tip');
+      if (tip.classList.contains('visible')) {
+        tip.style.left = (e.clientX + 14) + 'px';
+        tip.style.top  = (e.clientY - 8) + 'px';
+      }
+    }, { passive: true });
+  },
+
+  _installStageHotspots(app) {
+    // Stage-level click for bookshelf focus (left panel)
+    app.stage.interactive = true;
+    app.stage.on('pointertap', (e) => {
+      if (this.state === STATES.ROOM_IDLE) {
+        const W = window.innerWidth;
+        const x = e.data.global.x;
+        if (x < W * 0.24) {
+          this.transition(STATES.BOOKSHELF_FOCUS);
+        }
+      }
+    });
+  },
+
+  _onResize() {
+    const W = window.innerWidth, H = window.innerHeight;
+    this.app.renderer.resize(W, H);
+    this.scene.resize(W, H);
+    // Note: on resize, scene rebuild is ideal but expensive; for prototype, accept minor drift
+  },
+
+  // ── Boot sequence ──
+  _startBootSequence() {
+    const bootLines = document.getElementById('boot-lines');
+    const btn = document.getElementById('boot-init-btn');
+
+    const lines = [
+      { label: 'ATOMS J REPOSITORY SYSTEM', val: '', valClass: 'val-dim' },
+      { label: 'ARCHIVE NODE:', val: 'UNRESOLVED', valClass: 'val-warn' },
+      { label: 'TEMPORAL INDEX:', val: 'UNAVAILABLE', valClass: 'val-err' },
+      { label: 'MEMORY INTEGRITY:', val: '82.7%', valClass: 'val-warn' },
+      { label: 'ANOMALIES DETECTED:', val: '03', valClass: 'val-err' },
+      { label: '', val: '', valClass: '' },
+      { label: 'OBSERVER PRESENCE:', val: 'CONFIRMED', valClass: 'val-ok' },
+      { label: 'RENDERER:', val: 'PIXI v7 — WEBGL', valClass: 'val-dim' },
+      { label: '', val: '', valClass: '' },
+      { label: 'INITIALIZING OBSERVER INTERFACE...', val: '', valClass: 'val-dim' },
+    ];
+
+    lines.forEach((l, i) => {
+      const el = document.createElement('div');
+      el.className = 'boot-line';
+      el.innerHTML = l.label
+        ? `<span class="label">${l.label}</span> <span class="${l.valClass}">${l.val}</span>`
+        : '&nbsp;';
+      bootLines.appendChild(el);
+      // First lines appear fast; later lines stagger slightly
+      const delay = i < 3 ? i * 60 : 180 + i * 100;
+      setTimeout(() => el.classList.add('visible'), delay);
+    });
+
+    // Show init button after lines complete
+    const lastDelay = 180 + lines.length * 100 + 250;
+    setTimeout(() => {
+      btn.classList.add('visible');
+      btn.addEventListener('click', () => this._initializeRepository(), { once: true });
+    }, lastDelay);
+  },
+
+  _initializeRepository() {
+    this.audio.init();
+    const bootScreen = document.getElementById('boot-screen');
+    bootScreen.classList.add('fade-out');
+    setTimeout(() => {
+      bootScreen.style.display = 'none';
+      // Start the environment clock only after the repo is fully revealed
+      this.envRunning = true;
+      this.transition(STATES.ROOM_IDLE);
+    }, 1400);
+  },
+
+  // ── Central state transition ──
+  transition(newState) {
+    const prev = this.state;
+    this.state = newState;
+    this.audio.setStateAudio(newState);
+    this._updateHUD(newState);
+    this._updateReturnBtn(newState);
+
+    switch (newState) {
+      case STATES.ROOM_IDLE:
+        this.terminal.close();
+        this.archive.close();
+        this.camera.transitionTo(STATES.ROOM_IDLE);
+        this.scene._drawScreenOff();
+        document.getElementById('hud').classList.add('visible');
+        break;
+
+      case STATES.DESK_APPROACH:
+        this.camera.transitionTo(STATES.DESK_APPROACH);
+        break;
+
+      case STATES.TERMINAL_FOCUS:
+        // Boot computer screen
+        this.scene.drawScreenOn();
+        // Brief flash/scan before terminal opens
+        gsap.to({}, { duration: 0.6, onComplete: () => this.terminal.open() });
+        break;
+
+      case STATES.BOOKSHELF_FOCUS:
+        this.terminal.close();
+        this.camera.transitionTo(STATES.BOOKSHELF_FOCUS);
+        break;
+
+      case STATES.READING_OVERLAY:
+        // Overlay handles itself via openBook
+        break;
+
+      case STATES.RETURNING:
+        this.terminal.close();
+        this.archive.close();
+        this.camera.transitionTo(STATES.RETURNING);
+        this.scene._drawScreenOff();
+        this.hideTip();
+        setTimeout(() => this.transition(STATES.ROOM_IDLE), 2200);
+        break;
+    }
+  },
+
+  _updateHUD(state) {
+    const el = document.getElementById('hud-state');
+    if (el) el.textContent = `STATE: ${state.toUpperCase()}`;
+  },
+
+  _updateReturnBtn(state) {
+    const btn = document.getElementById('return-btn');
+    const show = [
+      STATES.DESK_APPROACH, STATES.TERMINAL_FOCUS,
+      STATES.BOOKSHELF_FOCUS, STATES.READING_OVERLAY,
+    ].includes(state);
+    btn.style.display = show ? 'block' : 'none';
+  },
+
+  // ── Book interactions ──
+  openBook(book, bookGraphic) {
+    const s = this.state;
+    // If in room idle, zoom to bookshelf first then reopen
+    if (s === STATES.ROOM_IDLE) {
+      this.transition(STATES.BOOKSHELF_FOCUS);
+      setTimeout(() => this.openBook(book, bookGraphic), 950);
+      return;
+    }
+    // Terminal OPEN command arrives from TERMINAL_FOCUS — close terminal first, go to bookshelf
+    if (s === STATES.TERMINAL_FOCUS) {
+      this.terminal.close();
+      this.transition(STATES.BOOKSHELF_FOCUS);
+      setTimeout(() => this.openBook(book, bookGraphic), 900);
+      return;
+    }
+    // Ignore if already in overlay or any other state
+    if (s !== STATES.BOOKSHELF_FOCUS) return;
+
+    this._prevState = STATES.BOOKSHELF_FOCUS;
+    this.state = STATES.READING_OVERLAY;
+    this._updateHUD(STATES.READING_OVERLAY);
+    this._updateReturnBtn(STATES.READING_OVERLAY);
+
+    // Brief visual highlight on the selected book spine
+    if (bookGraphic) {
+      gsap.to(bookGraphic, { alpha: 1, duration: 0.1 });
+      gsap.to(bookGraphic.scale, { x: 1.08, y: 1.08, duration: 0.15, yoyo: true, repeat: 1, ease: 'power2.out' });
+    }
+
+    this.archive.openBook(book);
+  },
+
+  closeBook() {
+    this.archive.close();
+    const returnTo = this._prevState || STATES.BOOKSHELF_FOCUS;
+    this.state = returnTo;
+    this._updateHUD(returnTo);
+    this._updateReturnBtn(returnTo);
+  },
+
+  // ── Tooltip ──
+  showTip(text, source) {
+    const tip = document.getElementById('hotspot-tip');
+    tip.textContent = text;
+    tip.classList.add('visible');
+  },
+
+  hideTip() {
+    document.getElementById('hotspot-tip').classList.remove('visible');
+  },
+
+  // ── Anomaly event ──
+  triggerAnomaly() {
+    const flash = document.getElementById('anomaly-flash');
+    this.audio.playGlitch();
+    gsap.fromTo(flash, { opacity: 0 }, {
+      opacity: 1, duration: 0.1, yoyo: true, repeat: 5,
+      onComplete: () => { flash.style.opacity = 0; }
+    });
+    const anomalyEl = document.getElementById('hud-anomaly');
+    if (anomalyEl) {
+      const msg = LORE.anomalies[Math.floor(Math.random() * LORE.anomalies.length)];
+      anomalyEl.textContent = msg.msg;
+      anomalyEl.style.color = '#8a5aaa';
+      setTimeout(() => { anomalyEl.textContent = ''; }, 4000);
+    }
+  },
+};
+
+// Stage-level shelf hotspot is installed in AppController._setupPixi()
+// after the PixiJS app is ready — see _installStageHotspots()
+
+// ================================================================
+// INITIALIZE
+// ================================================================
+window.addEventListener('load', () => {
+  // Check PixiJS loaded
+  if (typeof PIXI === 'undefined') {
+    document.body.innerHTML = '<div style="color:#c8a84b;font-family:monospace;padding:40px;font-size:14px;">CRITICAL: PixiJS CDN failed to load.<br>Please check network connection.<br>The repository is unavailable.</div>';
+    return;
+  }
+  // Check GSAP loaded
+  if (typeof gsap === 'undefined') {
+    document.body.innerHTML = '<div style="color:#c8a84b;font-family:monospace;padding:40px;font-size:14px;">CRITICAL: GSAP CDN failed to load.</div>';
+    return;
+  }
+  AppController.init();
+});
+
+// ================================================================
+// VISIBILITY — pause on hidden tab
+// ================================================================
+document.addEventListener('visibilitychange', () => {
+  if (!AppController.app) return;
+  if (document.hidden) {
+    AppController.app.ticker.stop();
+  } else {
+    AppController.app.ticker.start();
+    AppController._lastNow = performance.now();
+  }
+});
+</script>
+</body>
+</html>

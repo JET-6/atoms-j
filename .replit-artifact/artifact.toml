@@ -1,0 +1,27 @@
+kind = "web"
+previewPath = "/"
+title = "Atoms J — Repository Outside Time"
+version = "1.0.0"
+id = "artifacts/atoms-j"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 24123
+
+[services.development]
+run = "pnpm --filter @workspace/atoms-j run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/atoms-j", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/atoms-j/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "24123"
+BASE_PATH = "/"
